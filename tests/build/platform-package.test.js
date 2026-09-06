@@ -215,7 +215,11 @@ test('CLI prints and saves the same success report, and cannot overwrite an exis
   const args = [cli, '--source', f.source, '--platform', f.platform, '--arch', f.arch, '--output', reportPath]
   const options = {
     encoding: 'utf8', timeout: 30000,
-    env: { ...process.env, NODE_PATH: path.resolve(__dirname, '../../node_modules') },
+    env: {
+      ...process.env,
+      // CI installs the released source in a sibling checkout, not beside these tools.
+      NODE_PATH: [process.env.NODE_PATH, path.resolve(__dirname, '../../node_modules')].filter(Boolean).join(path.delimiter),
+    },
   }
   const result = spawnSync(process.execPath, args, options)
   assert.equal(result.status, 0, result.stderr)
