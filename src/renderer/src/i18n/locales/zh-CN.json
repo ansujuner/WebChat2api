@@ -17,8 +17,20 @@
     "latency": "耗时",
     "retryAt": "可再次尝试时间：{{time}}",
     "empty": "没有匹配的账号。",
-    "jobState": { "running": "进行中", "cancelling": "停止中", "completed": "已完成", "cancelled": "已停止" },
-    "resultStatus": { "queued": "等待测活", "running": "正在测活", "passed": "本次通过", "failed": "本次失败", "skipped": "已跳过", "cancelled": "未执行／已取消" },
+    "jobState": {
+      "running": "进行中",
+      "cancelling": "停止中",
+      "completed": "已完成",
+      "cancelled": "已停止"
+    },
+    "resultStatus": {
+      "queued": "等待测活",
+      "running": "正在测活",
+      "passed": "本次通过",
+      "failed": "本次失败",
+      "skipped": "已跳过",
+      "cancelled": "未执行／已取消"
+    },
     "reasons": {
       "disabled": "账号已手动关闭，批量测活跳过。",
       "provider_disabled": "供应商已关闭，批量测活跳过。",
@@ -66,11 +78,11 @@
     "switchToChinese": "切换到中文"
   },
   "app": {
-    "name": "Chat2API",
+    "name": "WebChat2api",
     "description": "AI API 代理管理系统"
   },
   "nav": {
-    "dashboard": "仪表盘",
+    "dashboard": "首页",
     "providers": "供应商",
     "proxy": "代理设置",
     "models": "模型管理",
@@ -81,8 +93,8 @@
     "about": "关于"
   },
   "dashboard": {
-    "title": "仪表盘",
-    "description": "系统概览和实时监控",
+    "title": "首页",
+    "description": "账号、接口与运行状态，一处掌握。",
     "proxyStatus": "代理状态",
     "running": "运行中",
     "stopped": "已停止",
@@ -117,7 +129,21 @@
     "justNow": "刚刚",
     "minutesAgo": "{{count}}分钟前",
     "hoursAgo": "{{count}}小时前",
-    "daysAgo": "{{count}}天前"
+    "daysAgo": "{{count}}天前",
+    "eyebrow": "你的 AI，本地连接",
+    "heroTitle": "把网页里的 AI，接入你的工作流。",
+    "heroDescription": "统一管理你的网页 AI 账号，提供 OpenAI 与 Anthropic 兼容接口。延续对话上下文，让已有的客户端和工具接入使用。",
+    "manageAccounts": "管理账号",
+    "configureApi": "配置接口",
+    "connectionTitle": "客户端接入",
+    "openaiBaseUrl": "OpenAI 兼容 Base URL",
+    "anthropicEndpoint": "Anthropic 消息端点",
+    "copyAddress": "复制 Base URL",
+    "addressCopied": "接口地址已复制",
+    "copyFailed": "复制失败，请手动选择地址",
+    "apiKeyHelp": "在密钥管理中创建并复制 API 密钥，再填入客户端。",
+    "manageKeys": "管理密钥",
+    "overviewTitle": "运行概览"
   },
   "providers": {
     "title": "供应商管理",
@@ -827,7 +853,7 @@
     "resetFailed": "应用重置失败",
     "about": "关于",
     "aboutDesc": "应用程序信息和版本",
-    "appName": "Chat2API",
+    "appName": "WebChat2api",
     "appDesc": "多平台 AI 服务统一管理工具",
     "appVersion": "应用版本",
     "currentVersion": "当前版本",
@@ -1023,7 +1049,9 @@
     "reportIssue": "报告问题",
     "appUpdates": "应用更新",
     "credits": "由开源社区 ❤️ 制作",
-    "builtWith": "基于 Electron、React、TypeScript、Tailwind CSS、Zustand、Koa 等优秀的开源项目构建。"
+    "builtWith": "基于 Electron、React、TypeScript、Tailwind CSS、Zustand、Koa 等优秀的开源项目构建。",
+    "title": "WebChat2api",
+    "licenseLink": "查看开源许可证"
   },
   "prompts": {
     "title": "工具调用模拟",
@@ -1186,5 +1214,16 @@
       "customPromptPlaceholder": "输入自定义摘要提示词...",
       "customPromptHint": "留空使用默认提示词"
     }
+  },
+  "shell": {
+    "subtitle": "本地 AI 接口控制台",
+    "language": "界面语言",
+    "skipNavigation": "跳到主要内容",
+    "waitingStatus": "等待服务状态",
+    "navigation": "主导航",
+    "workspace": "工作空间",
+    "manage": "管理",
+    "expandSidebar": "展开侧栏",
+    "collapseSidebar": "收起侧栏"
   }
 }

@@ -643,7 +643,7 @@ export function AddProviderDialog({
                   onClick={() => setSelectedProvider(provider.id)}
                 >
                   <div className="flex items-start gap-3 flex-1 min-w-0">
-                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center overflow-hidden flex-shrink-0">
+                    <div className="provider-mark h-10 w-10 flex items-center justify-center overflow-hidden">
                       {providerIcons[provider.id] ? (
                         <img 
                           src={providerIcons[provider.id]} 
@@ -734,7 +734,7 @@ export function AddProviderDialog({
   const renderStep2 = () => (
     <div className="mt-4 space-y-4">
       <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-        <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center overflow-hidden">
+          <div className="provider-mark h-10 w-10 flex items-center justify-center overflow-hidden">
           {providerIcons[selectedProviderData?.id || ''] ? (
             <img 
               src={providerIcons[selectedProviderData?.id || '']} 

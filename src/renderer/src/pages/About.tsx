@@ -12,7 +12,7 @@ import {
   Zap,
   RefreshCw,
 } from 'lucide-react'
-import logoIcon from '@/assets/icons/icons.png'
+import logoIcon from '@/assets/brand/webchat2api.svg'
 
 type UpdatePhase = 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
 
@@ -223,14 +223,12 @@ export function About() {
     <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
       <div className="max-w-4xl mx-auto space-y-6 pb-12 px-4 animate-fade-in">
         <div className="flex flex-col items-center justify-center py-10 text-center relative">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-[var(--accent-primary)]/10 blur-[80px] rounded-full pointer-events-none" />
-
           <div className="relative mb-6 animate-scale-in">
-            <div className="relative w-24 h-24 rounded-[2rem] glass-card p-4 shadow-2xl border border-[var(--glass-border)] bg-[var(--glass-bg)] overflow-hidden">
+            <div className="relative w-24 h-24 overflow-hidden">
               <img
                 src={logoIcon}
-                alt="Chat2API Logo"
-                className="w-full h-full object-contain drop-shadow-md"
+                alt="WebChat2api"
+                className="w-full h-full object-contain"
               />
             </div>
           </div>
@@ -431,7 +429,7 @@ export function About() {
             © 2026 Chat2API Team • WebChat2api modified 2026-09-06 • GPL-3.0-or-later
             <br />
             <button type="button" className="underline" onClick={() => handleOpenExternal('https://github.com/ansujuner/WebChat2api/blob/main/LICENSE')}>
-              GNU GPL v3 — No warranty · Source and license
+              {t('about.licenseLink')}
             </button>
           </p>
         </div>

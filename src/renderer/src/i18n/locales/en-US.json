@@ -17,8 +17,20 @@
     "latency": "Latency",
     "retryAt": "Next retry time: {{time}}",
     "empty": "No matching accounts.",
-    "jobState": { "running": "Running", "cancelling": "Stopping", "completed": "Completed", "cancelled": "Stopped" },
-    "resultStatus": { "queued": "Queued", "running": "Testing", "passed": "Passed this check", "failed": "Failed this check", "skipped": "Skipped", "cancelled": "Not run / cancelled" },
+    "jobState": {
+      "running": "Running",
+      "cancelling": "Stopping",
+      "completed": "Completed",
+      "cancelled": "Stopped"
+    },
+    "resultStatus": {
+      "queued": "Queued",
+      "running": "Testing",
+      "passed": "Passed this check",
+      "failed": "Failed this check",
+      "skipped": "Skipped",
+      "cancelled": "Not run / cancelled"
+    },
     "reasons": {
       "disabled": "Manually disabled account; skipped by the batch.",
       "provider_disabled": "Disabled provider; skipped by the batch.",
@@ -66,11 +78,11 @@
     "switchToChinese": "Switch to Chinese"
   },
   "app": {
-    "name": "Chat2API",
+    "name": "WebChat2api",
     "description": "AI API Proxy Management System"
   },
   "nav": {
-    "dashboard": "Dashboard",
+    "dashboard": "Home",
     "providers": "Providers",
     "proxy": "Proxy Settings",
     "models": "Models",
@@ -81,8 +93,8 @@
     "about": "About"
   },
   "dashboard": {
-    "title": "Dashboard",
-    "description": "System overview and real-time monitoring",
+    "title": "Home",
+    "description": "Your accounts, API and runtime status in one place.",
     "proxyStatus": "Proxy Status",
     "running": "Running",
     "stopped": "Stopped",
@@ -117,7 +129,21 @@
     "justNow": "Just now",
     "minutesAgo": "{{count}}m ago",
     "hoursAgo": "{{count}}h ago",
-    "daysAgo": "{{count}}d ago"
+    "daysAgo": "{{count}}d ago",
+    "eyebrow": "Your AI, connected locally",
+    "heroTitle": "Bring web AI into your workflow.",
+    "heroDescription": "Manage your web AI accounts with OpenAI- and Anthropic-compatible APIs. Continue conversations from the clients and tools you already use.",
+    "manageAccounts": "Manage accounts",
+    "configureApi": "Configure API",
+    "connectionTitle": "Connect your client",
+    "openaiBaseUrl": "OpenAI-compatible Base URL",
+    "anthropicEndpoint": "Anthropic messages endpoint",
+    "copyAddress": "Copy Base URL",
+    "addressCopied": "API address copied",
+    "copyFailed": "Could not copy. Select the address manually.",
+    "apiKeyHelp": "Create and copy an API key in key management, then paste it into your client.",
+    "manageKeys": "Manage keys",
+    "overviewTitle": "Runtime overview"
   },
   "providers": {
     "title": "Provider Management",
@@ -827,7 +853,7 @@
     "resetFailed": "Failed to reset application",
     "about": "About",
     "aboutDesc": "Application information and version",
-    "appName": "Chat2API",
+    "appName": "WebChat2api",
     "appDesc": "Multi-platform AI Service Unified Management Tool",
     "appVersion": "App Version",
     "currentVersion": "Current Version",
@@ -1023,7 +1049,9 @@
     "reportIssue": "Report Issue",
     "appUpdates": "Application Updates",
     "credits": "Made with ❤️ by the Open Source Community",
-    "builtWith": "Built with Electron, React, TypeScript, Tailwind CSS, Zustand, Koa and other amazing open source projects."
+    "builtWith": "Built with Electron, React, TypeScript, Tailwind CSS, Zustand, Koa and other amazing open source projects.",
+    "title": "WebChat2api",
+    "licenseLink": "View open-source license"
   },
   "prompts": {
     "title": "Function Calling Simulation",
@@ -1186,5 +1214,16 @@
       "customPromptPlaceholder": "Enter custom summary prompt...",
       "customPromptHint": "Leave empty to use default prompt"
     }
+  },
+  "shell": {
+    "subtitle": "Local AI gateway console",
+    "language": "Interface language",
+    "skipNavigation": "Skip to main content",
+    "waitingStatus": "Waiting for service status",
+    "navigation": "Main navigation",
+    "workspace": "Workspace",
+    "manage": "Manage",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar"
   }
 }

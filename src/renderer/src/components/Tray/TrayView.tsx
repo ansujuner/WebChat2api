@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProvidersStore } from '@/stores/providersStore'
-import iconsPng from '@/assets/icons/icons.png'
+import iconsPng from '@/assets/brand/webchat2api.svg'
 import { observeProxyStatus, localProxyOrigin } from '@/lib/proxyStatusObserver'
 import { accountAvailability } from '../../../../shared/accountAvailability'
 
@@ -137,21 +137,21 @@ export function TrayView() {
     <div className="w-full h-[460px] flex flex-col select-none overflow-hidden bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl">
       <div className="absolute top-0 left-0 right-0 h-6 drag-region z-50" />
 
-      {/* Header with gradient */}
+      {/* The same restrained brand treatment as the main application. */}
       <div className={cn(
         "flex-none relative overflow-hidden",
         proxyRunning 
-          ? "bg-gradient-to-r from-emerald-500/90 via-teal-500/90 to-cyan-500/90" 
-          : "bg-gradient-to-r from-slate-400/90 via-slate-500/90 to-slate-600/90"
+          ? "bg-[#102d3a]"
+          : "bg-slate-700"
       )}>
         <div className="absolute inset-0 bg-black/5" />
         <div className="relative px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-lg border border-white/30">
-              <img src={iconsPng} alt="Chat2API" className="w-8 h-8" />
+              <img src={iconsPng} alt="WebChat2api" className="w-8 h-8" />
             </div>
             <div>
-              <h1 className="text-base font-bold text-white tracking-tight">Chat2API</h1>
+              <h1 className="text-base font-bold text-white tracking-tight">WebChat2api</h1>
               <div className="flex items-center gap-1.5 mt-0.5">
                 {proxyRunning ? (
                   <>

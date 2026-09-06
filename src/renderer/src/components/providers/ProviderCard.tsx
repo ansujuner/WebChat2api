@@ -94,7 +94,7 @@ export function ProviderCard({
     <Card hover className={cn('', className)}>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-[var(--accent-primary)]/10 flex items-center justify-center overflow-hidden">
+          <div className="provider-mark h-10 w-10 flex items-center justify-center overflow-hidden">
             {icon ? (
               <img 
                 src={icon} 

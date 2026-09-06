@@ -278,13 +278,17 @@ test('Z.ai default models match current web IDs and frontend version', () => {
   assert.match(adapter, /captcha_verify_param/)
 })
 
-test('Z.ai docs mark provider temporarily unavailable due to captcha risk control', () => {
-  const readme = readFileSync(join(root, 'README.md'), 'utf8')
-  const readmeCn = readFileSync(join(root, 'README_CN.md'), 'utf8')
+test('Chinese and English READMEs retain the Z.ai captcha boundary without claiming live availability', () => {
+  const readmeCn = readFileSync(join(root, 'README.md'), 'utf8')
+  const readmeEn = readFileSync(join(root, 'README_EN.md'), 'utf8')
   const doc = readFileSync(join(root, 'docs/providers/zai.md'), 'utf8')
 
-  assert.match(readme, /Z\.ai[^\n]*Temporarily unavailable due to frontend captcha risk control/)
-  assert.match(readmeCn, /Z\.ai[^\n]*受前端验证码风控限制，暂不可用/)
+  assert.match(readmeCn, /Z\.ai[^\n]*前端验证码风控[^\n]*暂不可用/)
+  assert.match(readmeEn, /Z\.ai[^\n]*temporarily unavailable due to frontend captcha risk control/)
+  for (const readme of [readmeCn, readmeEn]) {
+    assert.match(readme, /FRONTEND_CAPTCHA_REQUIRED/)
+    assert.ok(readme.includes('docs/providers/zai.md'))
+  }
   assert.match(doc, /当前状态 \| 受前端验证码风控限制，暂不可用/)
   assert.match(doc, /FRONTEND_CAPTCHA_REQUIRED/)
   assert.match(doc, /captcha_verify_param.*调试字段/)
@@ -299,12 +303,13 @@ test('provider guides cover the updated default catalog and verification boundar
   }
 })
 
-test('README catalogs mirror defaults and do not claim all Perplexity models are free', () => {
-  for (const path of ['README.md', 'README_CN.md']) {
+test('README provider links cover defaults without duplicating catalogs or claiming free Perplexity access', () => {
+  for (const path of ['README.md', 'README_EN.md']) {
     const readme = readFileSync(join(root, path), 'utf8')
     for (const provider of [deepseekConfig, glmConfig, kimiConfig, minimaxConfig, mimoConfig, perplexityConfig, qwenConfig, qwenAiConfig, zaiConfig]) {
-      assert.ok(readme.includes(provider.supportedModels!.join(', ')), provider.id)
+      assert.ok(readme.includes(`docs/providers/${provider.id}.md`), provider.id)
     }
+    assert.ok(readme.includes('docs/providers/arena.md'))
     assert.match(readme, /Perplexity.*(?:订阅|plan)/)
   }
   assert.equal(perplexityConfig.modelMappings?.Auto, 'turbo')

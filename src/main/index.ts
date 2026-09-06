@@ -174,7 +174,7 @@ async function setupApp(): Promise<void> {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'Chat2API',
+    title: 'WebChat2api',
     show: false,
   })
 

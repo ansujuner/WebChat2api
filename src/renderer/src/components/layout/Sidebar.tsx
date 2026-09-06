@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -61,51 +60,23 @@ function Tooltip({ label, children }: { label: string; children: React.ReactNode
 export function Sidebar() {
   const { t } = useTranslation()
   const { sidebarCollapsed, toggleSidebar } = useSettingsStore()
-  const { blockers, isDialogOpen, confirmNavigation, cancelNavigation } = useNavigationStore()
+  const { blockers, isDialogOpen, setPendingNavigation, confirmNavigation, cancelNavigation } = useNavigationStore()
   const navigate = useNavigate()
   const location = useLocation()
-  const [pendingHref, setPendingHref] = useState<string | null>(null)
 
   const hasBlockers = blockers.length > 0
-
-  const handleNavigation = (href: string) => {
-    if (hasBlockers && location.pathname !== href) {
-      setPendingHref(href)
-    } else {
-      navigate(href)
-    }
-  }
-
-  const handleConfirmNavigation = () => {
-    if (pendingHref) {
-      navigate(pendingHref)
-      setPendingHref(null)
-    }
-    confirmNavigation()
-  }
-
-  const handleCancelNavigation = () => {
-    setPendingHref(null)
-    cancelNavigation()
-  }
 
   const NavButton = ({ item }: { item: NavItem }) => {
     const title = t(item.titleKey)
     const buttonContent = (
-      <div
-        onClick={(e) => {
-          if (hasBlockers && location.pathname !== item.href) {
-            e.preventDefault()
-            handleNavigation(item.href)
-          }
-        }}
-        className="block"
-      >
         <NavLink
           to={item.href}
+          end={item.href === '/'}
+          aria-label={title}
           onClick={(e) => {
             if (hasBlockers && location.pathname !== item.href) {
               e.preventDefault()
+              setPendingNavigation(() => navigate(item.href))
             }
           }}
           className={({ isActive }) =>
@@ -126,7 +97,6 @@ export function Sidebar() {
             {title}
           </span>
         </NavLink>
-      </div>
     )
     
     if (sidebarCollapsed) {
@@ -139,24 +109,31 @@ export function Sidebar() {
     <>
       <aside
         className={cn(
-          'glass-sidebar flex flex-col transition-all duration-300 ease-in-out',
-          sidebarCollapsed ? 'w-[72px]' : 'w-64'
+          'app-sidebar flex shrink-0 flex-col border-r transition-[width] duration-200 ease-in-out',
+          sidebarCollapsed ? 'w-[76px]' : 'w-60'
         )}
       >
-        <nav className="flex-1 p-3 space-y-1 overflow-x-hidden overflow-y-auto pt-5">
-          {navItems.map((item) => (
-            <NavButton key={item.href} item={item} />
+        <nav id="primary-navigation" aria-label={t('shell.navigation')} className="flex-1 space-y-1 overflow-x-hidden overflow-y-auto p-3 pt-5">
+          {!sidebarCollapsed && <p className="sidebar-section-label px-3 pb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{t('shell.workspace')}</p>}
+          {navItems.map((item, index) => (
+            <div key={item.href}>
+              {index === 6 && <div className="pb-2 pt-6">{!sidebarCollapsed && <p className="sidebar-section-label px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{t('shell.manage')}</p>}</div>}
+              <NavButton item={item} />
+            </div>
           ))}
         </nav>
 
-        <div className="mx-4 border-t border-[var(--glass-border)] opacity-50" />
+        <div className="mx-4 border-t" />
 
         <div className="p-3 overflow-hidden flex justify-center">
           <button
+            type="button"
             className="sidebar-collapse-btn"
             onClick={toggleSidebar}
-            aria-label={sidebarCollapsed ? t('settings.sidebarCollapsedHelp') : t('settings.sidebarCollapsedHelp')}
-            title={sidebarCollapsed ? t('settings.sidebarCollapsedHelp') : t('settings.sidebarCollapsedHelp')}
+            aria-label={sidebarCollapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')}
+            title={sidebarCollapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')}
+            aria-expanded={!sidebarCollapsed}
+            aria-controls="primary-navigation"
           >
             {sidebarCollapsed ? (
               <PanelLeftOpen className="h-5 w-5" />
@@ -167,7 +144,7 @@ export function Sidebar() {
         </div>
       </aside>
 
-      <Dialog open={isDialogOpen} onOpenChange={(open) => !open && handleCancelNavigation()}>
+      <Dialog open={isDialogOpen} onOpenChange={(open) => !open && cancelNavigation()}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -179,12 +156,12 @@ export function Sidebar() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={handleCancelNavigation}>
+            <Button variant="outline" onClick={cancelNavigation}>
               {t('common.cancel')}
             </Button>
             <Button
               variant="destructive"
-              onClick={handleConfirmNavigation}
+              onClick={confirmNavigation}
             >
               {t('proxy.discardAndLeave')}
             </Button>

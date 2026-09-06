@@ -149,7 +149,7 @@ test('all brand-bearing UI locations share the map, while app artwork and naviga
     }).diagnostics?.length || 0, 0)
   }
   for (const file of ['pages/About.tsx', 'components/layout/Header.tsx']) {
-    assert.match(read(`src/renderer/src/${file}`), /import logoIcon from '@\/assets\/icons\/icons\.png'/)
+    assert.match(read(`src/renderer/src/${file}`), /import \w+ from '@\/assets\/brand\/webchat2api\.svg'/)
   }
   const sidebar = read('src/renderer/src/components/layout/Sidebar.tsx')
   assert.match(sidebar, /lucide-react/)

@@ -7,6 +7,14 @@ The original copyright and **GPL-3.0-or-later** grant are retained in
 
 ## Changes from the supplied project
 
+- v1.6.0 (2026-09-06): refreshed the application visual system, original
+  WebChat2api artwork, dashboard introduction and local connection display.
+  Chinese is the new-install default; existing language choices are retained
+  and English remains available from the header. Replaced historical images
+  with isolated current-version captures and made the repository homepage
+  Chinese-first with a matching English edition. Provider trademarks, storage
+  identifiers, account data and GPL notices are preserved.
+
 - v1.5.1 (2026-09-06): added exact-account real-message liveness checks,
   serial provider/all-account batches, cancellation of queued checks, safe
   progress reports and independent credential-validation controls. See
@@ -25,7 +33,7 @@ The original copyright and **GPL-3.0-or-later** grant are retained in
 - Added per-account/model Arena quota tracking, conservative Seedream limits
   and provider-reported retry timing without automatic generation retries.
 - Replaced provider brand placeholders with website-sourced local icons;
-  retained the application's own branding and generic interface controls.
+  application artwork is independently refreshed in v1.6.0.
 - Hardened error/stream completion handling, configuration boundaries and
   project-scoped Windows restart scripts; expanded regression coverage.
 

@@ -52,10 +52,23 @@ records the precise source and local SHA-256 hashes, retrieval date, and changes
 
 All provider cards, the add-provider selector, login-guide headings, and the model
 list use the shared `src/renderer/src/lib/providerIcons.ts` map. Unknown/custom
-providers retain their generic fallback. The About page and header keep the
-existing Chat2API application artwork. Sidebar navigation, settings controls,
-status symbols, and the internal model-mapping symbol are generic UI icons, not
-provider logos, and were not replaced.
+providers retain their generic fallback. Provider marks retain the verified official
+artwork rather than being redesigned with the application.
+
+## Application identity — refreshed 2026-09-06
+
+The WebChat2api application now uses an original, code-authored chat/code mark at
+`src/renderer/src/assets/brand/webchat2api.svg`. It is not an official mark of any
+AI provider. `scripts/generate-brand-assets.cjs` renders the same source into the
+application, installer and favicon PNG/ICO assets using isolated Electron.
+The header, About page and tray share this identity. The original vector banners
+in `docs/assets/` and these application marks are distributed under the project's
+GPL-3.0-or-later terms. This does not change the separate status of provider marks.
+
+The historical upstream screenshot files in `docs/screenshots/` have been replaced
+with current, isolated application captures. See that directory's README and
+manifest for the capture process and demonstration-data boundary. The screenshots
+do not expose production accounts or prove live provider availability.
 
 ## Updating
 

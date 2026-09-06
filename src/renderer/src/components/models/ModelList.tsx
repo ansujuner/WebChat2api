@@ -80,7 +80,7 @@ const ModelRow = memo(({ model, isSelected, onSelect, t }: ModelRowProps) => {
             <img 
               src={providerIcon} 
               alt={model.providerName} 
-              className="h-4 w-4 object-contain"
+              className="h-5 w-5 rounded bg-white p-0.5 object-contain"
             />
           ) : (
             <Database className="h-4 w-4 text-muted-foreground" />

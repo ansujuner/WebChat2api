@@ -52,7 +52,17 @@ export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
       theme: 'system',
-      setTheme: (theme) => set({ theme }),
+      setTheme: async (theme) => {
+        if (theme !== 'light' && theme !== 'dark' && theme !== 'system') return
+        set({ theme })
+        try {
+          const saved = await window.electronAPI.config.update({ theme })
+          if (!saved) throw new Error('Theme configuration could not be saved')
+          set((state) => ({ config: state.config ? { ...state.config, theme: state.theme } : null }))
+        } catch (error) {
+          console.error('Failed to update theme:', error)
+        }
+      },
       sidebarCollapsed: false,
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
@@ -75,12 +85,15 @@ export const useSettingsStore = create<SettingsState>()(
           set({ proxyModeSaving: false })
         }
       },
-      language: 'en-US',
+      language: i18n.resolvedLanguage === 'en-US' ? 'en-US' : 'zh-CN',
       setLanguage: async (language) => {
+        if (language !== 'zh-CN' && language !== 'en-US') return
         set({ language })
         await i18n.changeLanguage(language)
         try {
-          await window.electronAPI.config.update({ language: language })
+          const saved = await window.electronAPI.config.update({ language })
+          if (!saved) throw new Error('Language configuration could not be saved')
+          set((state) => ({ config: state.config ? { ...state.config, language: state.language } : null }))
         } catch (error) {
           console.error('Failed to update language:', error)
         }
@@ -147,13 +160,15 @@ export const useSettingsStore = create<SettingsState>()(
       fetchConfig: async () => {
         try {
           const config = await window.electronAPI.config.get()
+          const language = config.language === 'en-US' || config.language === 'zh-CN' ? config.language : get().language
           set({ 
             config,
             autoStart: config.autoStart,
             autoStartProxy: config.autoStartProxy,
             oauthProxyMode: config.oauthProxyMode || 'system',
-            language: config.language || 'en-US',
+            language,
           })
+          await i18n.changeLanguage(language)
         } catch (error) {
           console.error('Failed to fetch config:', error)
         }
@@ -163,9 +178,15 @@ export const useSettingsStore = create<SettingsState>()(
       name: 'chat2api-settings',
       // In-flight UI state must never be restored after a crash/restart.
       partialize: ({ proxyModeSaving: _saving, ...state }) => state,
-      merge: (persisted, current) => ({ ...current, ...(persisted as Partial<SettingsState>), proxyModeSaving: false }),
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<SettingsState> | undefined
+        return { ...current, ...saved,
+          theme: saved?.theme === 'light' || saved?.theme === 'dark' || saved?.theme === 'system' ? saved.theme : current.theme,
+          language: saved?.language === 'en-US' || saved?.language === 'zh-CN' ? saved.language : current.language,
+          proxyModeSaving: false }
+      },
       onRehydrateStorage: () => (state) => {
-        if (state?.language) {
+        if (state?.language === 'zh-CN' || state?.language === 'en-US') {
           i18n.changeLanguage(state.language)
         }
       },

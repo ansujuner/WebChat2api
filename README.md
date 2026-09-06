@@ -1,281 +1,107 @@
-# WebChat2api
-
-> Maintained derivative of Chat2API, modified on 2026-09-06. Original copyright and GPL-3.0-or-later terms are preserved. See [NOTICE](NOTICE), [changes](MODIFICATIONS.md), and [current setup](docs/local-deployment.md). Historical upstream screenshots and feature descriptions below are not a guarantee of current provider availability. Source publication does not imply a packaged binary release.
-
-
-Current account controls: [manual enable/disable, DeepSeek suspension recovery and Arena model quotas](docs/account-scheduling.md). Provider logos use documented official website assets; see [asset sources](THIRD_PARTY_ASSETS.md).
-
-New in v1.5.1: [real-message liveness checks for one account, one provider or all accounts](docs/account-liveness.md), with exact account binding and no retry/failover.
-
 <p align="center">
-  <img src="build/icons.png" alt="Chat2API Logo" width="128" height="128">
+  <img src="build/icon.png" width="80" height="80" alt="WebChat2api 应用图标">
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.5.1-blue?style=flat-square&logo=github" alt="Release">
-  <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License">
-  <br>
-  <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/Electron-44.2.0-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron"></a>
-  <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React"></a>
-  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript"></a>
-  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
-</p>
+<h1 align="center">WebChat2api</h1>
+<p align="center">管理网页 AI 账号，把熟悉的对话接入你的客户端。</p>
+<p align="center"><strong>中文</strong> | <a href="README_EN.md">English</a></p>
+<p align="center"><a href="docs/README.md">文档导航</a> · <a href="docs/local-deployment.md">本地部署</a> · <a href="docs/claude-code.md">Claude Code</a> · <a href="https://github.com/ansujuner/WebChat2api/issues">问题反馈</a></p>
 
-<p align="center">
-  <strong><a href="README_CN.md">中文</a> | <a href="https://chat2api-doc.vercel.app/">Official Website</a> | <a href="https://chat2api-doc.vercel.app/docs">Documentation</a></strong>
-</p>
+![WebChat2api 功能概览](docs/assets/overview.svg)
 
-<p align="center">
-  <strong>Multi-platform AI Service Unified Management Tool</strong>
-</p>
+WebChat2api 是基于 **Chat2API** 维护的 Electron 桌面应用：集中管理多个供应商账号，将已适配的网页对话接入 **OpenAI 兼容 API** 和 **Anthropic Messages 兼容接口**。适合希望在自己的客户端里继续使用网页账号、管理多轮会话和排查账号状态的用户。
 
-<p align="center">
-  Chat2API adapts official web chat services to an OpenAI-compatible interface. It supports providers such as DeepSeek, GLM, Kimi, MiniMax, Qwen, and Z.ai, and integrates with tools like openlcaw, Cline, and Roo-Code. Model access, quotas, and subscription requirements remain controlled by each provider.
-</p>
+> **先说明边界：** 接口兼容不等于供应商原生 API 的全部能力。登录、人工验证、模型权限、订阅和额度仍由官网决定；模型出现在列表中，也不代表该账号此刻能够生成。此仓库提供源码与本地运行方式，不承诺每个平台已有可下载的安装包。
 
-![Product Preview](docs/screenshots/preview.png)
+## 一个桌面入口，几件实用的事
 
-## ✨ Features
+| 能力 | 当前行为 |
+| --- | --- |
+| **账号真实测活** | 对指定账号发一条简短消息；只有完整、非空的正常回复才通过。支持单账号、单供应商和全部账号逐个检查，不换号、不自动重试。 |
+| **独立启停与冷却** | 手动开关、凭据状态和临时冷却分别保存。关闭的账号不参与调度，冷却到期不会擅自启用手动关闭的账号。 |
+| **保留网页上下文** | 可续聊的网页适配器复用原会话，后续只向官网发送新增输入或工具结果；系统提示和工具说明只在新会话首轮初始化。 |
+| **Claude Code 与工具调用** | 支持 Messages、流式事件和客户端工具往返；设置页的工具测试实际执行两轮无副作用验证，而不是仅显示连接成功。 |
+| **Arena 文本与生图** | 使用账号独立的正常 Chrome/Edge 登录与运行时模型目录；分别处理文本续聊、单张文生图和账号/模型限额。 |
+| **本地代理管理** | 管理监听地址、网关 API Key、模型映射与请求日志；系统代理和直连模式使用一致的网络设置。 |
 
-- OpenAI Compatible API: Provides standard OpenAI-compatible API endpoints for seamless integration
-- Multi-Provider Support: Connect DeepSeek, GLM, Kimi, MiniMax, Perplexity 🆕, Qwen, Z.ai and more
-- 🆕 Context Management: Intelligent conversation context management with sliding window, token limit, and summary strategies
-- 🆕 Function Calling Support: Universal tool calling capability for all models via prompt engineering, compatible with Cherry Studio, Kilo Code, and other clients
-- 🆕 Model Mapping: Flexible model name mapping with wildcard support and preferred provider/account selection
-- 🆕 Custom Parameters: Support for custom HTTP headers to enable web search, thinking mode, and deep research features
-- Dashboard Monitoring: Real-time request traffic, token usage, and success rates
-- API Key Management: Generate and manage keys for your local proxy
-- Model Management: View and manage available models from all providers
-- Request Logs: Detailed request logging for debugging and analysis
-- Proxy Configuration: Flexible proxy settings and routing strategies
-- System Tray Integration: Quick access to status from menu bar
-- Multilingual: English and Simplified Chinese support
-- Modern UI: Clean, responsive interface with dark/light theme support
+## 看看界面
 
-## 🤖 Supported Providers
+**以下截图来自当前应用的隔离演示数据，不含真实账号；统计、状态和模型示例不代表真实可用性。** 顶部横幅是功能示意，不是服务可用性报告。
 
-| Provider         | Auth Type     | OAuth | Models                                                                                                                                                                                                                                          |
-| ---------------- | ------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DeepSeek         | User Token    | Yes   | deepseek-v4-flash, deepseek-v4-pro, deepseek-v4-flash-vision-exp |
-| GLM              | Refresh Token | Yes   | GLM-5.3-Flash, GLM-5.3 |
-| Kimi             | JWT Token     | Yes   | Kimi-K3, Kimi-K2.6 |
-| MiniMax          | JWT Token     | Yes   | MiniMax-Agent |
-| Mimo             | Cookie        | Yes   | MiMo-V2.5-Pro, MiMo-V2.5 |
-| Perplexity       | Cookie        | Yes   | Best, Auto, Sonar 2, GPT-5.6 Terra, GPT-5.6 Sol, Gemini 3.8 Flash, Claude Sonnet 5, Claude Opus 5, Kimi K3, GLM 5.3, Grok 4.6, Nemotron 3 Ultra |
-| Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.7, Qwen3.8-Max, Qwen3.7-Max, Qwen3.6-Flash |
-| Qwen AI (Global) | JWT Token     | Yes   | Qwen3.7-Plus, Qwen3.8-Max |
-| Z.ai             | JWT Token     | Yes   | GLM-5.3-Flash, GLM-5.3, GLM-5.2, GLM-5-Turbo, GLM-5V-Turbo, GLM-4.7; Temporarily unavailable due to frontend captcha risk control |
+![仪表盘：本地代理与请求概览（演示数据）](docs/screenshots/dashboard.png)
 
-Provider adaptation notes and manual model-addition guides are in [docs/providers](docs/providers/README.md).
+| 供应商与账号 | 模型管理 |
+| :---: | :---: |
+| ![供应商页面（演示数据）](docs/screenshots/providers.png) | ![模型页面（演示数据）](docs/screenshots/models.png) |
 
-Model audit: 2026-09-06. See the [provider-by-provider official-site audit](docs/providers/model-audit-2026-09-06.md). Catalog and payload checks are not authenticated generation tests. Perplexity named models require the appropriate plan; MiniMax-Agent is server-selected. Restart to sync built-in defaults; custom models are retained.
+<details>
+<summary>更多当前界面</summary>
 
-## 📥 Installation
+[代理服务](docs/screenshots/proxy.png) · [API Key](docs/screenshots/api-keys.png) · [请求日志](docs/screenshots/logs.png) · [设置](docs/screenshots/settings.png) · [会话](docs/screenshots/Session.png) · [关于](docs/screenshots/about.png) · [整体预览](docs/screenshots/preview.png)
 
-### Download
+[英文界面预览](docs/screenshots/preview-en.png) · [英文深色模式](docs/screenshots/preview-en-dark.png)
 
-Download the latest release from [GitHub Releases](https://github.com/ansujuner/WebChat2api/releases):
+</details>
 
-| Platform              | Download                                |
-| --------------------- | --------------------------------------- |
-| macOS (Apple Silicon) | `Chat2API-x.x.x-arm64.dmg`              |
-| macOS (Intel)         | `Chat2API-x.x.x-x64.dmg`                |
-| Windows               | `Chat2API-x.x.x-x64-setup.exe`          |
-| Linux                 | `Chat2API-x.x.x-x64.AppImage` or `.deb` |
+## 从源码开始
 
-### Build from Source
-
-**Requirements:**
-
-- Node.js 22.18+ (Node.js 24 LTS recommended)
-- npm
-- Git
+需要 **Node.js 22.18+**（推荐 Node.js 24）、npm 和 Git。已有运行验证以 Windows 为主；仓库中的 macOS/Linux 构建命令不等于已完成对应平台的运行验证。
 
 ```bash
-# Clone the repository
 git clone https://github.com/ansujuner/WebChat2api.git
 cd WebChat2api
-
-# Install dependencies
-npm install
-
-# Start development server
-npx electron-vite dev 2>&1
+npm ci
+npm run build
+npm start
 ```
 
-### Build for Production
+Windows 也可以在 `npm ci` 后使用以下启动器，负责检查运行环境并构建、启动应用：
 
-```bash
-npm run build              # Build the application
-npm run build:mac          # Build for macOS (dmg, zip)
-npm run build:win          # Build for Windows (nsis)
-npm run build:linux        # Build for Linux (AppImage, deb)
-npm run build:all          # Build for all platforms
+```powershell
+.\scripts\start-local.ps1 -Build
 ```
 
-## 📖 Usage
+需要开发热更新时，Windows 使用 `npm run dev:win`，macOS/Linux 使用 `npm run dev`。更新与安全重启步骤见[本地部署指南](docs/local-deployment.md)，不要通过清空账号目录来升级。
 
-### Step 1: Launch the App
+### 接入你的客户端
 
-After installation, launch Chat2API. You'll see the main dashboard.
+1. 在「供应商」添加或登录自己的账号，按需进行一次**测活**。测活会消耗真实请求，且不需要先启动 HTTP 代理。
+2. 启动代理，读取软件实际显示的**监听端口**，在「API Key」取得本地网关密钥。
+3. 使用下表配置客户端。模型从软件当前启用的模型列表或 `GET /v1/models` 选择，不照抄过时的模型名称。
 
-### Step 2: Add a Provider
+| 客户端 | Base URL | 密钥 |
+| --- | --- | --- |
+| OpenAI 兼容客户端 | `http://127.0.0.1:<运行端口>/v1` | 本应用的网关 API Key |
+| Claude Code / Anthropic 兼容客户端 | `http://127.0.0.1:<运行端口>`，**不加 `/v1`** | 同一个网关 API Key |
 
-1. Navigate to **Providers** from the sidebar
-2. Click **Add Provider** button
-3. Select a built-in provider (e.g., DeepSeek)
-4. Enter your authentication credentials
+`<运行端口>` 是占位符，请替换为软件显示值；已有配置会保留，某台机器的端口不是全局默认值。本机客户端使用 `127.0.0.1`，不是监听用的 `0.0.0.0`。**不要把官网 Token 或 Cookie 填进客户端的 API Key。** Claude Code 的启动器、模型配置和不支持的扩展见[接入指南](docs/claude-code.md)。
 
-For example, to get a DeepSeek token:
+## 供应商与能力边界
 
-1. Visit [DeepSeek Chat](https://chat.deepseek.com/)
-2. Start any conversation
-3. Press `F12` to open Developer Tools
-4. Go to **Application** > **Local Storage**
-5. Find `userToken` and copy its value
+当前包含以下适配器，也可添加通用 OpenAI 兼容供应商。具体登录方式、模型及限制以对应文档和软件当前目录为准：
 
-### Step 3: Configure Proxy
+[DeepSeek](docs/providers/deepseek.md) · [GLM](docs/providers/glm.md) · [Kimi](docs/providers/kimi.md) · [MiniMax](docs/providers/minimax.md) · [MiMo](docs/providers/mimo.md) · [Perplexity](docs/providers/perplexity.md) · [Qwen 国内](docs/providers/qwen.md) · [Qwen AI 国际](docs/providers/qwen-ai.md) · [Z.ai](docs/providers/zai.md) · [Arena](docs/providers/arena.md)
 
-1. Navigate to **Proxy Settings** from the sidebar
-2. Set the port (default: 8080)
-3. Choose a load balancing strategy:
-   - **Round Robin**: Distributes requests evenly across accounts
-   - **Fill First**: Uses one account until limit is reached
-   - **Failover**: Automatically switches on failure
-4. Click **Start Proxy**
+- **测活不是全模型认证。** 通过只说明指定账号、所用模型和这一次请求正常。批量跳过手动关闭的账号/供应商；显式单账号检查可检查关闭或旧状态异常的账号，但不会启用它，也不能绕过冷却、每日额度或已知封禁。停止操作取消后续队列，已提交的请求可能仍需等待结束。见[账号测活](docs/account-liveness.md)与[启停、冷却和限额](docs/account-scheduling.md)。
+- **多轮不是盲目找“最后一个聊天”。** 客户端可以发送完整历史，代理只在匹配到同一网页会话时向官网发送增量；模型、系统提示或工具变化、历史不匹配及应用重启可能需要新会话。通用 OpenAI API 供应商仍按无状态协议发送历史。只发本轮输入的客户端可使用 `X-Chat2API-Session-ID`，见[续聊规则](docs/providers/conversation-continuity.md)。
+- **协议兼容不是 Claude 模型服务。** 网页模型不会变成 Claude；工具实际由客户端在其权限下执行。`count_tokens` 是本地估算，不用于精确计费；不提供 Anthropic 服务端工具、签名 thinking 或原生提示缓存。无效工具参数或未完成的流不会被伪装为成功。
+- **Arena 保留官网限制。** 每个账号使用独立浏览器资料和真实目录；需要人工验证时暂停，不绕过验证。生图仅支持单张文生图、URL 输出和官网自动尺寸，不支持图片编辑、批量或指定分辨率；本地限额不是官网额度承诺。见[Arena 使用说明](docs/providers/arena.md)。
+- **各站验证和订阅仍然有效。** Z.ai 可能因前端验证码风控而暂不可用；遇到 `FRONTEND_CAPTCHA_REQUIRED` 需在官网人工处理，不自动重试。Perplexity 模型受账号订阅权限限制，不承诺全部免费。
 
-### Step 4: Test the API
+## 文档与验证
 
-Using Python (OpenAI SDK):
+| 想做什么 | 从这里开始 |
+| --- | --- |
+| 安装、启动、更新和重启 | [本地部署](docs/local-deployment.md) |
+| 配置 Claude Code、检查工具调用 | [Claude Code 接入](docs/claude-code.md) |
+| 查看账号测活、停用与恢复规则 | [真实测活](docs/account-liveness.md) · [账号调度](docs/account-scheduling.md) |
+| 排查登录浏览器或系统代理 | [网络与登录说明](docs/network-login-update.md) |
+| 了解实际验证范围与历史审查 | [发布验证记录](docs/release-validation.md) · [完整文档导航](docs/README.md) |
 
-```python
-from openai import OpenAI
+开发校验使用 `npm test` 和 `npm run build`。通过本地模拟测试、构建或 `/health` 检查，均不等于真实供应商生成成功；带日期的记录只反映当时的验证范围。真实请求检查是显式选择加入的操作，不自动重试。反馈问题请提供版本、供应商、模型及脱敏错误，**不要上传账号文件、浏览器资料、Cookie、Token、API Key 或未检查的日志/流量记录**。
 
-client = OpenAI(
-    api_key="your-api-key",
-    base_url="http://localhost:8080/v1"
-)
+## 开源与致谢
 
-response = client.chat.completions.create(
-    model="deepseek-v4-flash",
-    messages=[
-        {"role": "user", "content": "Hello, who are you?"}
-    ]
-)
+本项目是 **Chat2API** 的维护修改版，保留 **Chat2API Team** 的原作者署名，使用 **GPL-3.0-or-later**。完整条款见 [LICENSE](LICENSE)，原项目与修改版说明见 [NOTICE](NOTICE) 和 [MODIFICATIONS.md](MODIFICATIONS.md)。
 
-print(response.choices[0].message.content)
-```
-
-### Step 5: Manage API Keys (Optional)
-
-For security, you can enable API Key authentication:
-
-1. Go to **API Keys** page
-2. Click **New API Key**
-3. Enter a name and description
-4. Copy the generated key
-
-## 📸 Screenshots
-
-| Dashboard | Providers |
-|-----------|-----------|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Providers](docs/screenshots/providers.png) |
-
-| Proxy Settings | API Keys |
-|----------------|----------|
-| ![Proxy](docs/screenshots/proxy.png) | ![API Keys](docs/screenshots/api-keys.png) |
-
-| Models | Session |
-|--------|---------|
-| ![Models](docs/screenshots/models.png) | ![Session](docs/screenshots/Session.png) |
-
-## ⚙️ Settings
-
-- **Port**: Change the proxy listening port (default: 8080)
-- **Routing Strategy**: Round Robin or Fill First
-- **Auto-start**: Launch proxy automatically on app startup
-- **Theme**: Light, Dark, or System preference
-- **Language**: English or Simplified Chinese
-
-## 🏗️ Architecture
-
-```
-Chat2API/
-├── src/
-│   ├── main/                    # Electron main process
-│   │   ├── index.ts            # App entry point
-│   │   ├── tray.ts             # System tray integration
-│   │   ├── proxy/              # Proxy server management
-│   │   ├── ipc/                # IPC handlers
-│   │   └── utils/              # Utilities
-│   ├── preload/                # Context bridge
-│   └── renderer/               # React frontend
-│       ├── components/         # UI components
-│       ├── pages/              # Page components
-│       ├── stores/             # Zustand state
-│       └── hooks/              # Custom hooks
-├── build/                      # Build resources
-└── scripts/                    # Build scripts
-```
-
-## 🔧 Tech Stack
-
-| Component | Technology            |
-| --------- | --------------------- |
-| Framework | Electron 44.2.0 / Chromium 152 |
-| Frontend  | React 18 + TypeScript |
-| Styling   | Tailwind CSS          |
-| State     | Zustand               |
-| Build     | Vite + electron-vite  |
-| Packaging | electron-builder      |
-| Server    | Koa                   |
-
-## 📁 Data Storage
-
-Application data is stored in `~/.chat2api/` directory:
-
-- `config.json` - Application configuration
-- `providers.json` - Provider settings
-- `accounts.json` - Account credentials (encrypted)
-- `logs/` - Request logs
-
-## ❓ FAQ
-
-### macOS: "App is damaged and can't be opened"
-
-Due to macOS security mechanisms, apps downloaded outside the App Store may trigger this warning. Run the following command to fix it:
-
-```bash
-sudo xattr -rd com.apple.quarantine "/Applications/Chat2API.app"
-```
-
-### How to update?
-
-Check for updates in the **About** page, or download the latest version from [GitHub Releases](https://github.com/ansujuner/WebChat2api/releases).
-
-## 🤝 Contributing
-
-1. Fork the project
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-GNU General Public License v3.0. See [LICENSE](LICENSE) for details.
-
-This means:
-
-- ✅ Free to use, modify, and distribute
-- ✅ Derivative works must be open-sourced under the same license
-- ✅ Must preserve original copyright notices
-
-## 🙏 Acknowledgments
-
-- [Electron](https://www.electronjs.org/) - Cross-platform framework
-- [React](https://react.dev/) - UI framework
-- [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript
-- [Tailwind CSS](https://tailwindcss.com/) - CSS framework
-- [Zustand](https://zustand-demo.pmnd.rs/) - State management
-- [Koa](https://koajs.com/) - HTTP server
+供应商品牌仅用于识别兼容服务，不表示官方合作或背书；其图标、商标**不因本项目而改为 GPL 授权**。官网资源来源及权利说明见 [THIRD_PARTY_ASSETS.md](THIRD_PARTY_ASSETS.md)。

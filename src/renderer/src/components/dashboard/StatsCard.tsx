@@ -39,7 +39,7 @@ export function StatsCard({ title, value, icon: Icon, trend, className }: StatsC
         </div>
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
+        <div className="stat-card-value">{value}</div>
         {trend && (
           <div className={cn('flex items-center text-xs mt-1', getTrendColor())}>
             {getTrendIcon()}

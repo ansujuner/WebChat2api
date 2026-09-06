@@ -237,7 +237,7 @@ export function LoginGuideDialog({
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center overflow-hidden">
+            <div className="provider-mark h-12 w-12 flex items-center justify-center overflow-hidden">
               {providerIcons[provider.id] ? (
                 <img 
                   src={providerIcons[provider.id]} 

@@ -833,7 +833,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   modelMappings: createDefaultModelMappings(),
   defaultModelMappingsSeeded: true,
   theme: 'system',
-  language: 'en-US',
+  language: 'zh-CN',
   autoStart: false,
   autoStartProxy: false,
   minimizeToTray: true,

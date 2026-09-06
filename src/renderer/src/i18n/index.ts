@@ -14,24 +14,30 @@ const resources = {
   },
 }
 
+i18n.on('languageChanged', language => {
+  if (typeof document !== 'undefined') document.documentElement.lang = language.startsWith('en') ? 'en-US' : 'zh-CN'
+})
+
 i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
     resources,
-    fallbackLng: 'en-US',
+    fallbackLng: 'zh-CN',
+    supportedLngs: ['zh-CN', 'en-US'],
     debug: false,
     interpolation: {
       escapeValue: false,
     },
     detection: {
-      order: ['localStorage', 'navigator'],
+      // Respect a saved choice, but a fresh installation always starts in Chinese.
+      order: ['localStorage'],
       caches: ['localStorage'],
       lookupLocalStorage: 'i18nextLng',
       convertDetectedLanguage: (lng: string) => {
         if (lng.includes('zh')) return 'zh-CN'
         if (lng.includes('en')) return 'en-US'
-        return 'en-US'
+        return 'zh-CN'
       },
     },
   })
