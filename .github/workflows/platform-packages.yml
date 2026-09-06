@@ -1,0 +1,189 @@
+name: macOS and Linux packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: Existing clean-source release tag to build without changing its source
+        required: true
+        default: source-v1.6.7
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-packages-${{ inputs.source_tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.platform }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin
+            arch: arm64
+          - runner: macos-15-intel
+            platform: darwin
+            arch: x64
+          - runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+    env:
+      SOURCE_TAG: ${{ inputs.source_tag }}
+      TARGET_PLATFORM: ${{ matrix.platform }}
+      TARGET_ARCH: ${{ matrix.arch }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - name: Checkout packaging tools
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout immutable released source
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.source_tag }}
+          path: source
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.13.0'
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+      - name: Verify source and native architecture
+        run: |
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const p = require('./package.json');
+          assert.match(process.env.SOURCE_TAG, /^source-v\d+\.\d+\.\d+$/);
+          assert.equal(process.env.SOURCE_TAG, `source-v${p.version}`);
+          assert.equal(process.platform, process.env.TARGET_PLATFORM);
+          assert.equal(process.arch, process.env.TARGET_ARCH);
+          const fs = require('node:fs');
+          fs.mkdirSync('artifacts', {recursive: true});
+          fs.writeFileSync('artifacts/platform-builder.json', JSON.stringify({
+            ...p.build,
+            mac: {...p.build.mac, identity: null, hardenedRuntime: false},
+            appImage: {...p.build.appImage, executableArgs: ['--no-first-run']},
+          }, null, 2));
+          NODE
+          mkdir -p artifacts
+          git rev-parse HEAD > artifacts/source-commit.txt
+      - name: Install Linux desktop test dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2t64 libgbm1 libxss1 libfuse2t64 ruby ruby-dev build-essential
+          sudo gem install fpm --version 1.15.1 --no-document
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Check packaging tools
+        run: NODE_PATH="$PWD/node_modules" node --test ../tests/build/platform-package.test.js
+      - name: Run regression suite
+        run: node --test --test-reporter=tap --test-concurrency=4 "tests/**/*.test.*" > artifacts/tests.tap 2>&1 || { tail -100 artifacts/tests.tap; exit 1; }
+      - name: Build and typecheck
+        run: npm run build
+      - name: Prepare Linux Electron sandbox
+        if: matrix.platform == 'linux'
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+      - name: Run isolated production application checks
+        run: |
+          ELECTRON_PATH="$(node -p "require('electron')")"
+          if [ "$TARGET_PLATFORM" = linux ]; then
+            xvfb-run -a node scripts/smoke-app.cjs --electron "$ELECTRON_PATH"
+          else
+            node scripts/smoke-app.cjs --electron "$ELECTRON_PATH"
+          fi
+      - name: Package macOS application
+        if: matrix.platform == 'darwin'
+        run: |
+          npx --no-install electron-builder --config artifacts/platform-builder.json --mac --dir --"$TARGET_ARCH" --publish never
+          MAC_DIR=dist/mac
+          if [ "$TARGET_ARCH" = arm64 ]; then MAC_DIR=dist/mac-arm64; fi
+          node ../scripts/sign-mac-adhoc.cjs "$PWD" "$PWD/$MAC_DIR/Chat2API.app"
+          codesign --verify --deep --strict --verbose=2 "$MAC_DIR/Chat2API.app"
+          npx --no-install electron-builder --config artifacts/platform-builder.json --mac dmg zip --"$TARGET_ARCH" --prepackaged "$MAC_DIR/Chat2API.app" --publish never
+      - name: Package Linux application
+        if: matrix.platform == 'linux'
+        run: npx --no-install electron-builder --config artifacts/platform-builder.json --linux AppImage deb tar.gz --"$TARGET_ARCH" --publish never
+        env:
+          USE_SYSTEM_FPM: 'true'
+      - name: Verify package bytes and executable architecture
+        run: node ../scripts/verify-platform-package.cjs --source "$PWD" --platform "$TARGET_PLATFORM" --arch "$TARGET_ARCH" --output "$PWD/artifacts/package-integrity.json"
+      - name: Verify actual installer container contents
+        run: node ../scripts/check-platform-containers.cjs "$PWD"
+      - name: Run actual packaged application
+        run: |
+          if [ "$TARGET_PLATFORM" = darwin ]; then
+            APP_DIR=dist/mac
+            if [ "$TARGET_ARCH" = arm64 ]; then APP_DIR=dist/mac-arm64; fi
+            node ../scripts/smoke-packaged-app.cjs --source "$PWD" --executable "$PWD/$APP_DIR/Chat2API.app/Contents/MacOS/Chat2API" --report "$PWD/artifacts/packaged-app-smoke.json"
+          else
+            APP_DIR=dist/linux-unpacked
+            if [ "$TARGET_ARCH" = arm64 ]; then APP_DIR=dist/linux-arm64-unpacked; fi
+            sudo chown root:root "$APP_DIR/chrome-sandbox"
+            sudo chmod 4755 "$APP_DIR/chrome-sandbox"
+            xvfb-run -a node ../scripts/smoke-packaged-app.cjs --source "$PWD" --executable "$PWD/$APP_DIR/chat2api" --report "$PWD/artifacts/packaged-app-smoke.json"
+          fi
+      - name: Stage only verified release assets
+        run: |
+          node ../scripts/stage-platform-assets.cjs "$PWD"
+          git diff --exit-code
+      - name: Upload validated packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.platform }}-${{ matrix.arch }}
+          path: source/artifacts/release-assets/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checks-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            source/artifacts/*.json
+            source/artifacts/*.tap
+            source/artifacts/source-commit.txt
+          retention-days: 7
+
+  publish:
+    name: Upload verified packages to existing release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      SOURCE_TAG: ${{ inputs.source_tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout packaging tools
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download validated packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          path: verified-packages
+          merge-multiple: true
+      - name: Verify all four builds and upload without overwriting assets
+        run: node scripts/publish-platform-assets.cjs verified-packages
