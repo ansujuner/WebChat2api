@@ -28,7 +28,7 @@
 
 如果 PowerShell 提示脚本被执行策略禁止，请按你所在设备的管理要求处理；本脚本不会修改系统执行策略。
 
-如果依赖尚未安装，先运行 `npm ci`。如果之前使用了 `--ignore-scripts`，启动器提示 Electron 运行时缺失时，可在项目目录仅安装本项目已锁定版本的运行时：
+如果依赖尚未安装，先运行 `npm ci`；源码发布包已补齐自动安装锁定 Electron 运行时的步骤，首次安装需要联网。直接下载 ZIP 的用户无需 Git，解压后在项目目录安装即可。如果之前使用了 `--ignore-scripts`，启动器提示 Electron 运行时缺失时，可在项目目录仅安装本项目已锁定版本的运行时：
 
 ```powershell
 node .\node_modules\electron\install.js

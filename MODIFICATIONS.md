@@ -1,11 +1,17 @@
 # WebChat2api modifications
 
-Modified: **2026-09-06**. This is a maintained derivative of the supplied
+Modified: **2026-09-06 through 2026-09-07**. This is a maintained derivative of the supplied
 Chat2API working copy, not an official release of any AI provider.
 The original copyright and **GPL-3.0-or-later** grant are retained in
 [NOTICE](NOTICE); the complete GNU GPL v3 text is in [LICENSE](LICENSE).
 
 ## Changes from the supplied project
+
+- Source release preparation (2026-09-07): explicitly install the pinned Electron
+  runtime before native dependency preparation during `npm ci`. Electron 44's
+  package does not perform that download automatically. Added installation
+  regression checks and direct clean-source download instructions; provider
+  behavior, account storage and dependency versions are unchanged.
 
 - v1.6.6 (2026-09-06): fixed installed-browser login startup from an elevated
   Windows launcher by delegating to the existing ordinary-user desktop shell,

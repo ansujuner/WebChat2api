@@ -47,7 +47,9 @@ The individual page screenshots below use the Chinese UI; an [English dark-mode 
 
 ## Run from source
 
-Requires **Node.js 22.18+** (Node.js 24 recommended), npm, and Git. Runtime verification has primarily been on Windows; macOS/Linux build commands in the repository do not establish runtime verification on those platforms.
+**Download directly:** [v1.6.6 clean source ZIP](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.6/WebChat2api-1.6.6-source.zip) · [Release notes and checksums](https://github.com/ansujuner/WebChat2api/releases/tag/source-v1.6.6). This is source, not an installer; accounts, logs, dependencies, and compiled output are excluded.
+
+Requires **Node.js 22.18+** (Node.js 24 recommended) and npm. After extracting the ZIP, run the last three commands below inside `WebChat2api-1.6.6`; Git is not required for a downloaded archive. Alternatively, clone with Git. Runtime verification has primarily been on Windows; macOS/Linux build commands in the repository do not establish runtime verification on those platforms.
 
 ```bash
 git clone https://github.com/ansujuner/WebChat2api.git
@@ -56,6 +58,8 @@ npm ci
 npm run build
 npm start
 ```
+
+`npm ci` automatically installs the pinned Electron runtime. The first installation needs network access to download dependencies and the runtime. If a download fails, restore connectivity and run it again rather than skipping install scripts and attempting to start.
 
 On Windows, after `npm ci`, you can instead use the launcher to check the runtime, build, and start the app:
 

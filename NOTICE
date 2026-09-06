@@ -19,7 +19,7 @@ GNU General Public License for more details.
 A complete, unmodified copy of GNU GPL version 3 is in LICENSE.
 SPDX-License-Identifier: GPL-3.0-or-later
 
-WebChat2api modifications: 2026-09-06; maintained at
+WebChat2api modifications: 2026-09-06 through 2026-09-07; maintained at
 https://github.com/ansujuner/WebChat2api
 See MODIFICATIONS.md for the changed behavior and build instructions.
 The supplied working copy was not a Git checkout; no upstream commit

@@ -22,7 +22,7 @@
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "start:sandbox": "electron . --no-sandbox",
-    "postinstall": "electron-builder install-app-deps",
+    "postinstall": "node node_modules/electron/install.js && electron-builder install-app-deps",
     "prebuild:check": "node scripts/prebuild-check.js",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win --x64",
