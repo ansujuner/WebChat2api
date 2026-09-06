@@ -14,6 +14,16 @@ const { spawn } = require('node:child_process')
 
 const workspace = path.resolve(__dirname, '..')
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+const sanitize = text => text.replace(/\u001b\[[0-9;]*m/g, '')
+  .replace(/\b(?:https?|wss?):\/\/[^\s"'<>]+/gi, '[url redacted]')
+  .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[jwt redacted]')
+  .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+  .replace(/\bsk-[A-Za-z0-9_-]{10,}/g, '[key redacted]')
+  .replace(/((?:^|[\s"'[{,])(?:authorization|set-cookie|cookie|credentials|access_?token|refresh_?token|session_?token|api_?key|password|secret|token)(?:["']?)\s*(?::(?!:)|=)\s*)[^\r\n]*/gim, '$1[redacted]')
+const diagnosticLines = text => {
+  const lines = sanitize(text).split(/\r?\n/).map(line => line.slice(0, 700)).filter(Boolean)
+  return lines.length <= 80 ? lines : [...lines.slice(0, 40), '[middle diagnostic lines omitted]', ...lines.slice(-39)]
+}
 
 function inside(target, directory) {
   const relative = path.relative(directory, path.resolve(target))
@@ -45,8 +55,9 @@ async function freePort() {
 }
 
 function childProcess(executable, args, env, cwd) {
-  const process = spawn(executable, args, { cwd, env, shell: false, windowsHide: true, stdio: 'ignore' })
-  const state = { process, settled: false, result: null }
+  const process = spawn(executable, args, { cwd, env, shell: false, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
+  const state = { process, settled: false, result: null, stderr: '' }
+  process.stderr.on('data', data => { state.stderr = (state.stderr + data.toString('utf8')).slice(-128 * 1024) })
   state.completion = new Promise(resolve => {
     const finish = result => {
       if (state.settled) return
@@ -137,6 +148,7 @@ async function main() {
     if (/^(ELECTRON_RUN_AS_NODE|ELECTRON_RENDERER_URL|NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|SSLKEYLOGFILE|https?_proxy|all_proxy|no_proxy)$/i.test(key)) delete env[key]
   }
   const port = await freePort()
+  require('./configure-test-keychain.cjs')(root, env)
   const profileFlag = `--user-data-dir=${directories.userData}`
   const report = {
     passed: false, version: manifest.version, platform: process.platform, arch: process.arch,
@@ -209,7 +221,7 @@ async function main() {
     report.checks.push('single-instance-command-and-clean-quit')
     report.passed = true
   } catch (error) {
-    report.error = error instanceof Error ? error.message : String(error)
+    report.error = sanitize(error instanceof Error ? error.message : String(error))
   } finally {
     client?.close()
     if (app && !app.settled) {
@@ -217,6 +229,13 @@ async function main() {
       await waitExit(quit, 5000).catch(() => { if (!quit.settled) quit.process.kill('SIGKILL') })
       await waitExit(app, 5000).catch(() => app.process.kill('SIGTERM'))
       await waitExit(app, 5000).catch(() => app.process.kill('SIGKILL'))
+      await waitExit(app, 3000).catch(() => {})
+    }
+    report.childExitCode = app?.result?.code ?? null
+    report.childSignal = app?.result?.signal ?? null
+    if (!report.passed) {
+      report.stderrDiagnostic = diagnosticLines(app?.stderr || '')
+      if (app?.result?.error) report.launchError = sanitize(app.result.error)
     }
     fs.mkdirSync(path.dirname(reportFile), { recursive: true })
     fs.writeFileSync(reportFile, `${JSON.stringify(report, null, 2)}\n`)

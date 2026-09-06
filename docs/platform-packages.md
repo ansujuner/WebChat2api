@@ -42,6 +42,8 @@ they do not add platform support to Windows-only login features.
    before building. No assertion is removed and no application input is modified.
 3. Run the existing isolated production-application smoke checks, with only local
    synthetic fixtures and no real provider accounts or production profiles.
+   macOS tests use a newly created, unlocked disposable Keychain rather than the
+   runner image's reused/default keychain. Native `safeStorage` is not mocked.
 4. Inspect every ASAR build/legal file and external icon/WASM byte against the
    build inputs; check the executable's Mach-O/ELF architecture.
 5. Extract every installer without installing it, compare contained ASAR/resources,

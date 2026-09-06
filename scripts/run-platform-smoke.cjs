@@ -11,10 +11,21 @@ const inside = (target, base) => {
   const relative = path.relative(base, target)
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
 }
-const safeLines = text => text.split(/\r?\n/)
-  .filter(line => /error|assert|failed|timeout|timed out|keychain|securityagent|oscrypt|SecItem|SecKeychain/i.test(line))
-  .filter(line => !/token|cookie|credential|authorization|bearer|password|secret|eyJ[A-Za-z0-9_-]{15}|https?:\/\//i.test(line))
-  .slice(-20).map(line => line.slice(0, 350))
+const sanitize = text => text.replace(/\u001b\[[0-9;]*m/g, '')
+  .replace(/\b(?:https?|wss?):\/\/[^\s"'<>]+/gi, '[url redacted]')
+  .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[jwt redacted]')
+  .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+  .replace(/\bsk-[A-Za-z0-9_-]{10,}/g, '[key redacted]')
+  .replace(/((?:^|[\s"'[{,])(?:authorization|set-cookie|cookie|credentials|access_?token|refresh_?token|session_?token|api_?key|password|secret|token)(?:["']?)\s*(?::(?!:)|=)\s*)[^\r\n]*/gim, '$1[redacted]')
+const safeLines = text => {
+  // Preserve native FATAL/sandbox/zygote diagnostics and their continuation lines;
+  // a keyword allowlist discarded the only evidence from early Chromium exits.
+  const lines = sanitize(text).split(/\r?\n/).map(line => line.slice(0, 700)).filter(Boolean)
+  return lines.length <= 80 ? lines : [...lines.slice(0, 40), '[middle diagnostic lines omitted]', ...lines.slice(-39)]
+}
+const nativeLines = text => safeLines(text.split(/\nBinary Images:/)[0]
+  .split(/\r?\n/).filter(line => /main.?thread|thread.?0|call graph|mach|oscrypt|\bSec|keychain|security|safe.?storage|electron|chat2api|CFRunLoop|NSApplication|dispatch|pthread|dyld|start/i.test(line))
+  .slice(0, 60).join('\n')).slice(0, 60)
 
 async function main() {
   assert.ok(/^(true|1)$/i.test(process.env.CI || ''), 'Platform smoke requires a disposable CI runner')
@@ -47,6 +58,7 @@ async function main() {
     if (/^(ELECTRON_RUN_AS_NODE|ELECTRON_RENDERER_URL|NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|SSLKEYLOGFILE)$/i.test(key)) delete env[key]
   }
   const executable = require(require.resolve('electron', { paths: [source] }))
+  require('./configure-test-keychain.cjs')(source, env)
   assert.ok(inside(fs.realpathSync(executable), source), 'Electron executable must belong to the source install')
   let child, timer, sampleTimer, sampler, timedOut = false, stderr = '', nativeDiagnostic = ''
   const killGroup = () => {
@@ -72,7 +84,8 @@ async function main() {
         sampler = spawn('/usr/bin/sample', [String(child.pid), '1', '1', '-file', '/dev/stdout'], {
           env, shell: false, stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000, killSignal: 'SIGKILL',
         })
-        sampler.stdout.on('data', data => { nativeDiagnostic = bound(nativeDiagnostic + data.toString('utf8')) })
+        // The main thread is near the beginning, not the tail of the stack report.
+        sampler.stdout.on('data', data => { nativeDiagnostic = (nativeDiagnostic + data.toString('utf8')).slice(0, 256 * 1024) })
         sampler.on('error', () => { nativeDiagnostic = '' })
       }, 100000)
     }
@@ -94,7 +107,7 @@ async function main() {
       passed, childExitCode: exit.code, childSignal: exit.signal || null,
       productionProfileUsed: false, nativeLauncher: true, fixtureRoot: fixture, timedOut,
       ...(timedOut ? { error: 'Isolated application exceeded the external 150-second hard deadline' } : {}),
-      ...(!passed ? { stderrDiagnostic: safeLines(stderr), nativeDiagnostic: safeLines(nativeDiagnostic) } : {}) }
+      ...(!passed ? { stderrDiagnostic: safeLines(stderr), nativeDiagnostic: nativeLines(nativeDiagnostic) } : {}) }
     fs.mkdirSync(path.dirname(output), { recursive: true })
     fs.writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`)
     console.log(JSON.stringify(report, null, 2))
