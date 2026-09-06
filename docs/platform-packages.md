@@ -65,3 +65,25 @@ Uploads never overwrite existing assets. All local caches, test profiles, raw
 runtime output, accounts, and test credentials remain out of published packages.
 Passing these checks is not a substitute for real-account provider testing, every
 supported distribution/OS version, or Apple signing/notarization.
+
+## Published v1.6.7 verification
+
+[Run 34064246728](https://github.com/ansujuner/WebChat2api/actions/runs/34064246728)
+completed all four native targets and the upload gate successfully. Per target:
+1,514 regression tests passed, 56 Windows-only cases were skipped, and there were
+zero failures/cancellations. All 62 isolated application checks and six actual
+packaged-application checks passed, including clean shutdown. Every installer
+container passed extraction and payload verification; this is not an installation
+or Gatekeeper/notarization certification on every end-user machine.
+
+The [release](https://github.com/ansujuner/WebChat2api/releases/tag/source-v1.6.7)
+includes ten binaries, four `BUILD-*.json` summaries, `BINARY-MANIFEST.json`, and
+`BINARY-SHA256SUMS.txt`. The original four source assets and source tag remain
+unchanged. The binary manifest records source commit
+`0e12167a6c68a2b458fb2cc3328bef60b5269d3e` and tooling commit
+`765b8ce42a9ccf54a5ca193f84ccbcbff6f56757`.
+
+This release uses manual downloads for updates: automatic-updater metadata was
+not published. Keep existing account data when updating. Binary checksums are in
+`BINARY-SHA256SUMS.txt`; the original `SHA256SUMS.txt` still covers source archives
+and the source manifest, not the installers.

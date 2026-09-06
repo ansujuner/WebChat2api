@@ -11,7 +11,7 @@
 
 WebChat2api 是基于 **Chat2API** 维护的 Electron 桌面应用：集中管理多个供应商账号，将已适配的网页对话接入 **OpenAI 兼容 API** 和 **Anthropic Messages 兼容接口**。适合希望在自己的客户端里继续使用网页账号、管理多轮会话和排查账号状态的用户。
 
-> **先说明边界：** 接口兼容不等于供应商原生 API 的全部能力。登录、人工验证、模型权限、订阅和额度仍由官网决定；模型出现在列表中，也不代表该账号此刻能够生成。此仓库提供源码与本地运行方式，不承诺每个平台已有可下载的安装包。
+> **先说明边界：** 接口兼容不等于供应商原生 API 的全部能力。登录、人工验证、模型权限、订阅和额度仍由官网决定；模型出现在列表中，也不代表该账号此刻能够生成。安装包、签名状态与验证范围以发布页说明为准。
 
 ## 一个桌面入口，几件实用的事
 
@@ -45,11 +45,24 @@ WebChat2api 是基于 **Chat2API** 维护的 Electron 桌面应用：集中管�
 
 </details>
 
+## macOS / Linux 安装包
+
+| 平台 | v1.6.7 直接下载 |
+| --- | --- |
+| macOS Apple Silicon | [DMG](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-mac-arm64.dmg) |
+| macOS Intel | [DMG](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-mac-x64.dmg) |
+| Linux x64 | [AppImage](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-x64.AppImage) · [DEB](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-x64.deb) |
+| Linux ARM64 | [AppImage](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-arm64.AppImage) · [DEB](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-arm64.deb) |
+
+[完整下载、ZIP/tar.gz 与校验文件](https://github.com/ansujuner/WebChat2api/releases/tag/source-v1.6.7)。macOS 包仅使用本地 ad-hoc 签名，**没有 Apple Developer ID 签名或公证**，系统可能阻止首次打开。Linux 需可用的 Chromium 沙箱；系统限制 AppImage 时优先使用 DEB，不建议关闭沙箱。自动发现外部 Chrome/Edge 登录目前仍仅支持 Windows。
+
+各平台采用原生构建和隔离检查，不代表真实账号或所有系统版本都经过验证。详见[打包与验证范围](docs/platform-packages.md)。
+
 ## 从源码开始
 
 **直接下载：** [v1.6.7 干净源码 ZIP](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/WebChat2api-1.6.7-source.zip) · [发布说明与校验文件](https://github.com/ansujuner/WebChat2api/releases/tag/source-v1.6.7)。这是源码包，不是安装程序；不含账号、日志、依赖或编译产物。
 
-需要 **Node.js 22.18+**（推荐 Node.js 24）和 npm。下载 ZIP 后解压，在 `WebChat2api-1.6.7` 目录执行下列后三条命令即可，不需要 Git；也可以用 Git 克隆。已有运行验证以 Windows 为主；仓库中的 macOS/Linux 构建命令不等于已完成对应平台的运行验证。
+需要 **Node.js 22.18+**（推荐 Node.js 24）和 npm。下载 ZIP 后解压，在 `WebChat2api-1.6.7` 目录执行下列后三条命令即可，不需要 Git；也可以用 Git 克隆。macOS/Linux 的原生打包和检查流程见上方说明。
 
 ```bash
 git clone https://github.com/ansujuner/WebChat2api.git

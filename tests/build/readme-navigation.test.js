@@ -108,8 +108,24 @@ test('current screenshots use one shared gallery with an explicit demo-not-avail
 test('availability, continuation, client tool, and Arena limits remain explicit in both languages', () => {
   const cn = pages['README.md']
   const en = pages['README_EN.md']
-  for (const pattern of [/不自动重试/, /不会启用它/, /后续队列/, /客户端可以发送完整历史/, /无状态协议/, /X-Chat2API-Session-ID/, /两轮无副作用/, /本地估算/, /不支持图片编辑、批量或指定分辨率/, /不承诺每个平台已有可下载的安装包/]) assert.match(cn, pattern)
-  for (const pattern of [/automatic retries/, /without enabling it/, /remaining queue/, /Clients may send full history/, /remain stateless/, /X-Chat2API-Session-ID/, /two real, harmless turns/, /local estimate/, /not editing, batches, or specified resolutions/, /does not promise downloadable installers/]) assert.match(en, pattern)
+  for (const pattern of [/不自动重试/, /不会启用它/, /后续队列/, /客户端可以发送完整历史/, /无状态协议/, /X-Chat2API-Session-ID/, /两轮无副作用/, /本地估算/, /不支持图片编辑、批量或指定分辨率/, /安装包、签名状态与验证范围以发布页说明为准/]) assert.match(cn, pattern)
+  for (const pattern of [/automatic retries/, /without enabling it/, /remaining queue/, /Clients may send full history/, /remain stateless/, /X-Chat2API-Session-ID/, /two real, harmless turns/, /local estimate/, /not editing, batches, or specified resolutions/, /See the release notes for available installers, signing status, and verification scope/]) assert.match(en, pattern)
+})
+
+test('native package downloads agree in both languages and disclose signing and runtime limits', () => {
+  const downloads = (file) => links(pages[file]).filter((url) => /\/releases\/download\/source-v1\.6\.7\/Chat2API-/.test(url)).sort()
+  const names = ['mac-arm64.dmg', 'mac-x64.dmg', 'x64.AppImage', 'x64.deb', 'arm64.AppImage', 'arm64.deb']
+  const expected = names.map((name) => `https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-${name}`).sort()
+  for (const file of ['README.md', 'README_EN.md']) {
+    const page = pages[file]
+    assert.deepEqual(downloads(file), expected)
+    assert.ok(localLinks(page).includes('docs/platform-packages.md'))
+    assert.match(page, /没有 Apple Developer ID 签名或公证|no Apple Developer ID signing or notarization/)
+    assert.match(page, /可能阻止首次打开|may block their first launch/)
+    assert.match(page, /不建议关闭沙箱|rather than disabling the sandbox/)
+    assert.match(page, /登录目前仍仅支持 Windows|login still supports Windows only/)
+    assert.match(page, /不代表真实账号或所有系统版本都经过验证|not real-account or all-OS-version certification/)
+  }
 })
 
 test('attribution and asset rights are retained without stale upstream websites or private paths', () => {

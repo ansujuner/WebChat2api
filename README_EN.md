@@ -11,7 +11,7 @@
 
 WebChat2api is a maintained derivative of **Chat2API**, built as an Electron desktop application. It manages accounts across providers and connects supported web conversations to an **OpenAI-compatible API** and an **Anthropic Messages-compatible interface**—for using your web accounts in your own clients, retaining conversation context, and checking account health.
 
-> **Scope first:** Protocol compatibility does not provide every capability of a provider's native API. Login, manual verification, model access, subscriptions, and quotas remain controlled by the provider. A model appearing in the catalogue does not prove that your account can generate with it now. This repository provides source and local setup instructions; it does not promise downloadable installers for every platform.
+> **Scope first:** Protocol compatibility does not provide every capability of a provider's native API. Login, manual verification, model access, subscriptions, and quotas remain controlled by the provider. A model appearing in the catalogue does not prove that your account can generate with it now. See the release notes for available installers, signing status, and verification scope.
 
 ## One desktop app, a few practical jobs
 
@@ -45,11 +45,24 @@ The individual page screenshots below use the Chinese UI; an [English dark-mode 
 
 </details>
 
+## macOS / Linux packages
+
+| Platform | v1.6.7 direct download |
+| --- | --- |
+| macOS Apple Silicon | [DMG](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-mac-arm64.dmg) |
+| macOS Intel | [DMG](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-mac-x64.dmg) |
+| Linux x64 | [AppImage](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-x64.AppImage) · [DEB](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-x64.deb) |
+| Linux ARM64 | [AppImage](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-arm64.AppImage) · [DEB](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/Chat2API-1.6.7-arm64.deb) |
+
+[All downloads, ZIP/tar.gz archives and checksums](https://github.com/ansujuner/WebChat2api/releases/tag/source-v1.6.7). macOS bundles have a local ad-hoc signature only: **no Apple Developer ID signing or notarization**. macOS may block their first launch. Linux requires a working Chromium sandbox; prefer DEB when your distribution restricts AppImage, rather than disabling the sandbox. Automatic external Chrome/Edge login still supports Windows only.
+
+Each platform has a native build and isolated checks, not real-account or all-OS-version certification. See [packaging and verification scope](docs/platform-packages.md).
+
 ## Run from source
 
 **Download directly:** [v1.6.7 clean source ZIP](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/WebChat2api-1.6.7-source.zip) · [Release notes and checksums](https://github.com/ansujuner/WebChat2api/releases/tag/source-v1.6.7). This is source, not an installer; accounts, logs, dependencies, and compiled output are excluded.
 
-Requires **Node.js 22.18+** (Node.js 24 recommended) and npm. After extracting the ZIP, run the last three commands below inside `WebChat2api-1.6.7`; Git is not required for a downloaded archive. Alternatively, clone with Git. Runtime verification has primarily been on Windows; macOS/Linux build commands in the repository do not establish runtime verification on those platforms.
+Requires **Node.js 22.18+** (Node.js 24 recommended) and npm. After extracting the ZIP, run the last three commands below inside `WebChat2api-1.6.7`; Git is not required for a downloaded archive. Alternatively, clone with Git. See the section above for native macOS/Linux packaging and verification scope.
 
 ```bash
 git clone https://github.com/ansujuner/WebChat2api.git
