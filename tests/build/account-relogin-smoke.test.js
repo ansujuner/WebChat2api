@@ -5,12 +5,14 @@ const path = require('node:path')
 const root = path.resolve(__dirname, '../..')
 const read = file => fs.readFileSync(path.join(root, file), 'utf8')
 
-test('existing-account production UI fixture is isolated and explicitly mocks only OAuth', () => {
+test('existing-account production UI fixture is isolated and explicitly marks its synthetic reauthentication boundary', () => {
   const fixture = read('scripts/smoke-account-relogin.cjs')
   const harness = read('scripts/smoke-app.cjs')
   assert.match(harness, /require\('\.\/smoke-account-relogin\.cjs'\)\(\{ invoke, check, ipcMain \}\)/)
   assert.match(harness, /productionProfileUsed: false/)
-  assert.match(fixture, /Only the OAuth IPC response is synthetic/)
+  assert.match(fixture, /Only the account reauthentication boundary is synthetic/)
+  assert.match(fixture, /ipcMain\.handle\(channel, originalHandler\)/)
+  assert.match(fixture, /not provider identity/)
   assert.match(fixture, /ipcMain\.handle\(channel/)
   assert.match(fixture, /ipcMain\.removeHandler\(channel\)/)
   assert.doesNotMatch(fixture, /readFile|process\.env|https:\/\/|fetch\(/)

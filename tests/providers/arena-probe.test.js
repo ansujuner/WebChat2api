@@ -25,7 +25,7 @@ function fixture(options = {}) {
       cancelInAppLogin() { cancelled++; finishLogin({ success: false }) },
     } },
     '../arena/browserManager': { arenaBrowserManager: {
-      async status(id) { assert.equal(id, profileId); calls.push({ type: 'status' }); return { authenticated: options.authenticated !== false, accountInfo: { email: 'verified@example.test' } } },
+      async status(id) { assert.equal(id, profileId); calls.push({ type: 'status' }); return { authenticated: options.authenticated !== false, accountInfo: { email: 'verified@example.test' }, ...(options.statusErrorCode ? { errorCode: options.statusErrorCode } : {}) } },
       async cancelAndWait() { waited++ },
     } },
     '../arena/protocol': {
@@ -44,6 +44,7 @@ function fixture(options = {}) {
     '../providers/arenaIntegration': { async syncArenaProviderModels(id) {
       assert.equal(id, profileId); calls.push({ type: 'catalog' }); if (options.catalogError) throw Error(secret)
       if (options.catalogQuotaError) throw new dependencies['../arena/protocol'].ArenaError('quota_unavailable')
+      if (options.catalogRouteError) throw new dependencies['../arena/protocol'].ArenaError('route_changed')
       return { supportedModels: models, modelMappings: {} }
     } },
     '../proxy/server': { proxyServer: { isRunning: () => !options.stopped } },
@@ -246,4 +247,29 @@ test('Arena live probe preserves typed quota initialization failure without expo
   assert.equal(report.status, 'quota_unavailable')
   assert.deepEqual(report.checks, [])
   assert.equal(f.calls.filter(call => call.type === 'http').length, 0)
+})
+
+test('Arena login and live preflight preserve route_changed without new requests or saved accounts', async () => {
+  for (const method of ['login', 'live']) {
+    for (const options of [{ authenticated: false, statusErrorCode: 'route_changed' }, { catalogRouteError: true }]) {
+      const f = fixture(options), report = await f[method]()
+      assert.equal(report.status, 'route_changed')
+      assert.equal(report.accountVerified, false)
+      assert.equal(f.calls.filter(call => call.type === 'http').length, 0)
+      assert.equal(f.loginStarts, 0)
+      assert.equal(f.saved.length, 0)
+    }
+  }
+})
+
+test('Arena HTTP text and image route_changed failures stay actionable without retries', async () => {
+  for (const [errorPath, expectedRequests] of [['/v1/chat/completions', 1], ['/v1/images/generations', 3]]) {
+    const f = fixture({ generationError: { status: 409, code: 'route_changed' }, errorPath })
+    const report = await f.live()
+    assert.equal(report.status, 'route_changed')
+    assert.equal(report.checks.at(-1).error, 'route_changed')
+    assert.equal(report.checks.at(-1).completed, false)
+    assert.equal(f.calls.filter(call => call.type === 'http' && call.request.body).length, expectedRequests)
+    assert.equal(f.saved.length, 0)
+  }
 })

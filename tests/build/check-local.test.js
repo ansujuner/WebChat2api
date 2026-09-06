@@ -35,7 +35,7 @@ function Get-CimInstance { foreach ($item in (${ps(JSON.stringify(metadata))} | 
 $global:launchCount = 0
 function Write-FixtureReport {
     param($Mode, $Status = 'ok', $Timestamp = [DateTimeOffset]::UtcNow.ToString('o'))
-    $body = @{ status = $Status; checkedAt = $Timestamp; live = ($Mode -notin @('catalog', 'login', 'arena-login', 'zai-login', 'accounts-status')); stream = ($Mode -eq 'stream'); protocol = $(if ($Mode -eq 'stream') { 'anthropic' } else { 'openai' }); untrustedExtra = 'fixture-not-for-output' }
+    $body = @{ status = $Status; checkedAt = $Timestamp; live = ($Mode -notin @('catalog', 'login', 'arena-login', 'zai-login', 'accounts-status', 'network')); stream = ($Mode -eq 'stream'); protocol = $(if ($Mode -eq 'stream') { 'anthropic' } else { 'openai' }); untrustedExtra = 'fixture-not-for-output' }
     $body | ConvertTo-Json | Set-Content -LiteralPath (Join-Path ${ps(f.dir)} "artifacts\\proxy-$Mode-probe.json") -Encoding UTF8
 }
 function Start-Process {
@@ -51,6 +51,20 @@ ${command || `& ${ps(f.script)} ${args} | ConvertTo-Json -Compress -Depth 4`}
   // Private shell + mocked process APIs: no real app dispatch/profile reads.
   return spawnSync(executable, ['-NoProfile', '-NonInteractive', '-Command', source], { cwd: root, windowsHide: true, encoding: 'utf8', timeout: 20000 })
 }
+
+windowsTest('network inspection dispatches read-only and rejects combined modes before launch', t => {
+  const f = fixture(t)
+  const result = run(f, { args: '-Network' })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(JSON.parse(result.stdout).Mode, 'network')
+  for (const mode of ['-Live', '-AccountStatus', '-ZaiLogin', '-ArenaLogin', '-Tools', '-Stream']) {
+    const combined = run(f, { command: `try { & ${ps(f.script)} -Network ${mode} } catch { @{ error = $_.Exception.Message; launches = $launchCount } | ConvertTo-Json -Compress }` })
+    assert.equal(combined.status, 0, combined.stderr)
+    const value = JSON.parse(combined.stdout)
+    assert.equal(value.launches, 0)
+    assert.match(value.error, /cannot be combined/)
+  }
+})
 
 windowsTest('catalog checks target one existing app with a hidden command-only child and no secret output', t => {
   const f = fixture(t)

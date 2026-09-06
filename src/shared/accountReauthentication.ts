@@ -1,4 +1,9 @@
 /** Public account-bound login result. Never include credentials, cookies, or upstream response text. */
+export const ACCOUNT_LOGIN_PROVIDERS = ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'arena'] as const
+export function supportsAccountLogin(providerId: string): boolean {
+  return (ACCOUNT_LOGIN_PROVIDERS as readonly string[]).includes(providerId)
+}
+
 export type AccountReauthenticationErrorCode =
   | 'invalid_account'
   | 'unsupported_provider'
@@ -9,6 +14,7 @@ export type AccountReauthenticationErrorCode =
   | 'identity_unverified'
   | 'login_required'
   | 'network_error'
+  | 'route_changed'
   | 'browser_error'
   | 'account_changed'
   | 'save_failed'

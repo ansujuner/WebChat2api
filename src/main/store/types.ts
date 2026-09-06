@@ -4,6 +4,7 @@
  */
 
 import type { ProviderStatus } from '../../shared/types'
+import type { ProviderNetworkProxyMode } from '../../shared/providerNetwork'
 import type { LegacyToolPromptConfig, ToolCallingConfig } from '../../shared/toolCalling.ts'
 import { DEFAULT_TOOL_CALLING_CONFIG } from '../../shared/toolCalling.ts'
 
@@ -133,6 +134,9 @@ export interface Account {
  * Represents an API provider configuration
  */
 export interface Provider {
+  /** Missing/inherit follows the application network default. */
+  networkProxyMode?: ProviderNetworkProxyMode
+  networkProxyUrl?: string
   /** Provider unique identifier */
   id: string
   /** Provider name */

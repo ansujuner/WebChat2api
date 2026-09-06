@@ -26,6 +26,8 @@ import type {
 } from '../../../shared/types'
 import type { AccountLivenessInput, AccountLivenessJob } from '../../../shared/accountLiveness'
 import type { AccountReauthenticationResult } from '../../../shared/accountReauthentication'
+import type { ProviderNetworkStatus, ProviderNetworkProxyMode } from '../../../shared/providerNetwork'
+export type { ProviderNetworkStatus, ProviderNetworkProxyMode } from '../../../shared/providerNetwork'
 export type { AccountReauthenticationResult, AccountReauthenticationErrorCode } from '../../../shared/accountReauthentication'
 export type { AccountLivenessInput, AccountLivenessJob } from '../../../shared/accountLiveness'
 
@@ -89,6 +91,8 @@ interface ProvidersAPI {
   getAll: () => Promise<Provider[]>
   getBuiltin: () => Promise<BuiltinProviderConfig[]>
   add: (data: {
+    networkProxyMode?: ProviderNetworkProxyMode
+    networkProxyUrl?: string
     id?: string
     name: string
     type?: 'builtin' | 'custom'
@@ -100,6 +104,7 @@ interface ProvidersAPI {
     credentialFields?: CredentialField[]
   }) => Promise<Provider>
   update: (id: string, updates: Partial<Provider>) => Promise<Provider | null>
+  getNetworkStatus: (id: string) => Promise<ProviderNetworkStatus>
   delete: (id: string) => Promise<boolean>
   checkStatus: (providerId: string) => Promise<ProviderCheckResult>
   checkAllStatus: () => Promise<Record<string, ProviderCheckResult>>

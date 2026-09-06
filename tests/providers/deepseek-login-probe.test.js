@@ -51,6 +51,11 @@ function fixture(options = {}) {
   const dependencies = {
     '../oauth/manager': { oauthManager }, '../oauth/externalBrowserLogin': { externalBrowserLoginManager },
     '../store/store': { storeManager },
+    '../network/proxy': { getProviderProxyConfig(id) {
+      assert.equal(id, 'deepseek')
+      const selected = storeManager.getConfig()
+      return options.proxyConfig ?? { mode: selected.oauthProxyMode || 'system' }
+    } },
   }
   const module = { exports: {} }
   const code = ts.transpileModule(readFileSync(join(root, 'src/main/diagnostics/deepseekLoginProbe.ts'), 'utf8'), {
@@ -86,7 +91,7 @@ test('successful verified login passes only with a normal provider page and neve
   assert.equal(result.live, false)
   assert.equal(result.stream, false)
   assert.equal(result.protocol, 'openai')
-  assert.deepEqual(f.calls[0], { operation: 'start', args: ['deepseek', 'deepseek', 600000, 'none'] })
+  assert.deepEqual(f.calls[0], { operation: 'start', args: ['deepseek', 'deepseek', 600000, { mode: 'none' }] })
   assert.equal(f.calls.filter(call => call.operation === 'cancel').length, 0)
   assert.equal(f.configReads, 1)
   assert.equal(f.timers.size, 0)
@@ -98,7 +103,7 @@ test('the saved system/direct proxy mode is forwarded exactly like ordinary OAut
   for (const [proxyMode, expected] of [['none', 'none'], ['system', 'system'], [undefined, 'system']]) {
     const f = fixture({ proxyMode })
     await f.run()
-    assert.equal(f.calls[0].args[3], expected)
+    assert.deepEqual(f.calls[0].args[3], { mode: expected })
     assert.equal(f.configReads, 1)
   }
 })

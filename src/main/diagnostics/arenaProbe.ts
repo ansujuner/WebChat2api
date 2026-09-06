@@ -16,7 +16,7 @@ export interface ArenaLoginReport {
   live: false
   stream: false
   protocol: 'openai'
-  status: 'awaiting_login' | 'passed' | 'login_busy' | 'login_not_completed' | 'action_required'
+  status: 'awaiting_login' | 'passed' | 'login_busy' | 'login_not_completed' | 'action_required' | 'route_changed'
   accountVerified: boolean
   models: string[]
 }
@@ -61,7 +61,7 @@ export async function runArenaLoginProbe(progress: (report: ArenaLoginReport) =>
     if (existing) {
       const credentials = arenaProfileCredentials(existing.credentials)
       const status = await arenaBrowserManager.status(credentials.browserProfileId)
-      if (!status.authenticated) return { ...base, status: 'action_required' }
+      if (!status.authenticated) return { ...base, status: status.errorCode === 'route_changed' ? 'route_changed' : 'action_required' }
       const catalog = await syncArenaProviderModels(credentials.browserProfileId)
       return { ...base, status: 'passed', accountVerified: true, models: catalog.supportedModels }
     }
@@ -74,14 +74,14 @@ export async function runArenaLoginProbe(progress: (report: ArenaLoginReport) =>
     const credentials = arenaProfileCredentials(result.credentials)
     // Independently recheck the returned owned browser before writing an account.
     const status = await arenaBrowserManager.status(credentials.browserProfileId)
-    if (!status.authenticated) return { ...base, status: 'action_required' }
+    if (!status.authenticated) return { ...base, status: status.errorCode === 'route_changed' ? 'route_changed' : 'action_required' }
     const catalog = await syncArenaProviderModels(credentials.browserProfileId)
     const duplicate = AccountManager.getByProviderId('arena', true).some(account => account.credentials?.browserProfileId === credentials.browserProfileId)
     if (!duplicate) AccountManager.create({ providerId: 'arena', nameSource: 'auto', email: status.accountInfo?.email, credentials })
     return { ...base, status: 'passed', accountVerified: true, models: catalog.supportedModels }
-  } catch {
+  } catch (error) {
     // Exceptions may contain profile paths or provider responses; reports contain categories only.
-    return { ...base, status: 'login_not_completed' }
+    return { ...base, status: error instanceof ArenaError && error.code === 'route_changed' ? 'route_changed' : 'login_not_completed' }
   } finally {
     if (pending && !settled) {
       try { oauthManager.cancelInAppLogin(); await arenaBrowserManager.cancelAndWait(); await pending }
@@ -94,7 +94,7 @@ export async function runArenaLoginProbe(progress: (report: ArenaLoginReport) =>
 function errorCategory(response: ProbeHttpResponse): string {
   const value = object(response.text)?.error
   if (response.status === 429 || value?.code === 'model_rate_limited') return 'rate_limited'
-  const allowed = ['action_required', 'model_not_available', 'invalid_request', 'browser_unavailable', 'account_busy', 'incomplete_stream', 'upstream_error', 'aborted', 'rate_limited', 'quota_unavailable'] as const
+  const allowed = ['action_required', 'route_changed', 'model_not_available', 'invalid_request', 'browser_unavailable', 'account_busy', 'incomplete_stream', 'upstream_error', 'aborted', 'rate_limited', 'quota_unavailable'] as const
   for (const code of allowed) {
     if (value?.code === code || value?.message === new ArenaError(code).message) return code
   }
@@ -103,7 +103,7 @@ function errorCategory(response: ProbeHttpResponse): string {
 }
 function failureStatus(response: ProbeHttpResponse, fallback: 'text_check_failed' | 'image_check_failed'): string {
   const category = errorCategory(response)
-  return ['action_required', 'rate_limited', 'quota_unavailable'].includes(category) ? category : fallback
+  return ['action_required', 'route_changed', 'rate_limited', 'quota_unavailable'].includes(category) ? category : fallback
 }
 function textReply(response: ProbeHttpResponse, marker: string): { completed: boolean; replyMatches: boolean } {
   const choice = object(response.text)?.choices?.[0]
@@ -139,7 +139,7 @@ export async function runArenaProbe(): Promise<ArenaProbeReport> {
     if (!account) return { ...report, status: accounts.length ? 'no_available_account' : 'login_required' }
     const credentials = arenaProfileCredentials(account.credentials)
     const status = await arenaBrowserManager.status(credentials.browserProfileId)
-    if (!status.authenticated) return { ...report, status: 'action_required' }
+    if (!status.authenticated) return { ...report, status: status.errorCode === 'route_changed' ? 'route_changed' : 'action_required' }
     const catalog = await syncArenaProviderModels(credentials.browserProfileId)
     report = { ...report, accountVerified: true, models: catalog.supportedModels }
     const health = await requestLoopback({ ...local, path: '/health', headers: {} })
@@ -178,6 +178,6 @@ export async function runArenaProbe(): Promise<ArenaProbeReport> {
       ...(!imageReturned ? { error: errorCategory(image) } : {}) }] }
     return { ...report, status: imageReturned ? 'passed' : failureStatus(image, 'image_check_failed') }
   } catch (error) {
-    return { ...report, status: error instanceof ArenaError && ['rate_limited', 'quota_unavailable'].includes(error.code) ? error.code : 'request_failed_not_retried' }
+    return { ...report, status: error instanceof ArenaError && ['route_changed', 'rate_limited', 'quota_unavailable'].includes(error.code) ? error.code : 'request_failed_not_retried' }
   } finally { inFlight = false }
 }

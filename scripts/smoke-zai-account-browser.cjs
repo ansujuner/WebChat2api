@@ -4,7 +4,7 @@
  */
 const assert = require('node:assert/strict')
 
-module.exports = async function verifyZaiAccountBrowser({ invoke, check, app, BrowserWindow, port, request }) {
+module.exports = async function verifyZaiAccountBrowser({ invoke, check, app, BrowserWindow, port, request, allowFixtureOrigin }) {
   const origin = 'https://chat.z.ai'
   const identity = { id: 'isolated-zai-browser-user', email: 'zai-browser@example.invalid', name: 'Fixture user' }
   const jwt = version => [Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
@@ -14,6 +14,7 @@ module.exports = async function verifyZaiAccountBrowser({ invoke, check, app, Br
   const name = 'Isolated Z.ai browser restore'
   const cooldownUntil = Date.now() + 600000
   const requests = [], sessions = [], generations = [], graphReads = [], conversationPages = []
+  const revokeOrigins = []
   const chats = new Map()
   const prompts = ['你好，请只回复 OK。', '记住标记 ZAI-FIXTURE-FIRST，只回复 OK。', '继续上一轮，只回复 OK。']
   let accountId, fixtureFailure, proxyStarted = false
@@ -57,10 +58,6 @@ module.exports = async function verifyZaiAccountBrowser({ invoke, check, app, Br
   </script></body></html>`
   const installWebsite = session => {
     sessions.push(session)
-    session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (details, callback) => {
-      const url = new URL(details.url)
-      callback({ cancel: url.origin !== origin && url.hostname !== '127.0.0.1' })
-    })
     session.protocol.handle('https', async request => {
       const url = new URL(request.url)
       try {
@@ -82,6 +79,12 @@ module.exports = async function verifyZaiAccountBrowser({ invoke, check, app, Br
           return new Response(JSON.stringify(recognized ? { ...identity, token: freshToken, role: 'user' }
             : { id: 'guest', email: 'fixture@guest.com', name: 'Guest', token: 'fixture-guest-token', role: 'user' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } })
+        }
+        if (url.pathname === '/api/v1/users/user/settings') {
+          // The provider-card background credential check has its own scoped
+          // transport now. It must not stand in for verified browser restoration.
+          assert.equal(request.method, 'GET')
+          return new Response('{}', { status: 401, headers: { 'Content-Type': 'application/json' } })
         }
         if (/^\/api\/v1\/chats\/[A-Za-z0-9_-]{1,128}$/.test(url.pathname)) {
           assert.equal(request.method, 'GET', 'Cursor recovery must be read-only')
@@ -125,12 +128,16 @@ module.exports = async function verifyZaiAccountBrowser({ invoke, check, app, Br
             { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } })
         }
         if (url.pathname === '/favicon.ico') return new Response(null, { status: 204 })
-        throw new Error('Unexpected website request in the account restore fixture')
+        throw new Error(`Unexpected website request in the account restore fixture: ${request.method} ${url.pathname}`)
       } catch (error) {
         fixtureFailure = error
         return new Response('Fixture request rejected', { status: 400 })
       }
     })
+    // The outer fixture firewall remains installed when the real browser proxy
+    // manager replaces its own webRequest listener. Only our intercepted origin
+    // is permitted, and only while this protocol fixture remains installed.
+    revokeOrigins.push(allowFixtureOrigin(session, origin))
   }
   const until = async (predicate, label) => {
     const deadline = Date.now() + 10000
@@ -265,6 +272,7 @@ module.exports = async function verifyZaiAccountBrowser({ invoke, check, app, Br
     if (proxyStarted) await invoke('window.electronAPI.proxy.stop()')
     if (accountId) await call('delete', accountId)
     app.off('session-created', installWebsite)
+    for (const revoke of revokeOrigins) revoke()
     for (const session of sessions) session.protocol.unhandle('https')
   }
   await invoke("window.location.hash = '#/'; void 0")

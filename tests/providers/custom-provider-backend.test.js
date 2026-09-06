@@ -13,7 +13,12 @@ function load(file, mocks = {}) {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText
   vm.runInNewContext(source, { module, exports: module.exports, URL, Date, Set, Object, Error, console,
-    require(name) { if (Object.hasOwn(mocks, name)) return mocks[name]; return require(name) },
+    require(name) {
+      if (Object.hasOwn(mocks, name)) return mocks[name]
+      if (name === '../../shared/providerNetwork' || name === '../../shared/providerNetwork.ts') return require('../../src/shared/providerNetwork.ts')
+      if (name === '../network/providerContext' || name === '../network/providerContext.ts') return require('../../src/main/network/providerContext.ts')
+      return require(name)
+    },
   }, { filename: file })
   return module.exports
 }
@@ -142,6 +147,27 @@ test('custom edit validates even blank values, cannot mutate identity or inject 
   const changed = ProviderManager.update(original.id, { name: ' Custom Renamed ', enabled: false, supportedModels: ['new'] })
   assert.equal(changed.name, 'Custom Renamed'); assert.equal(changed.enabled, false)
   assert.equal(original.name, 'Custom'); assert.equal(original.enabled, true)
+})
+
+test('custom and builtin channels save separate routes; export/import/duplicate retain only validated proxy settings', () => {
+  const { manager, ProviderManager, getProviders } = managers()
+  const direct = manager.create({ name: 'Direct channel', authType: 'token', apiEndpoint: 'http://localhost:1234', networkProxyMode: 'none' })
+  const proxied = manager.create({ name: 'Proxy channel', authType: 'token', apiEndpoint: 'http://localhost:1234',
+    networkProxyMode: 'custom', networkProxyUrl: 'http://LOCALHOST:07890/' })
+  assert.equal(proxied.networkProxyUrl, 'http://localhost:7890')
+  ProviderManager.update(direct.id, { networkProxyMode: 'system' })
+  assert.equal(getProviders().find(p => p.id === proxied.id).networkProxyMode, 'custom')
+  const exported = JSON.parse(manager.exportProvider(proxied.id))
+  assert.equal(exported.networkProxyMode, 'custom'); assert.equal(exported.networkProxyUrl, 'http://localhost:7890')
+  const imported = manager.importProvider(JSON.stringify({ ...exported, name: 'Imported channel' }))
+  assert.equal(imported.networkProxyUrl, proxied.networkProxyUrl)
+  assert.equal(manager.duplicate(proxied.id).networkProxyMode, 'custom')
+  const builtin = manager.create({ id: 'deepseek', type: 'builtin', name: 'Ignored', authType: 'token', apiEndpoint: 'https://ignored.invalid', networkProxyMode: 'none' })
+  assert.equal(ProviderManager.update(builtin.id, { networkProxyMode: 'system' }).networkProxyMode, 'system')
+  for (const changes of [{ networkProxyMode: 'bad' }, { networkProxyMode: 'custom' }, { networkProxyUrl: 'http://user:SECRET@localhost:7890' }]) {
+    assert.throws(() => ProviderManager.update(direct.id, changes), error => !error.message.includes('SECRET'))
+  }
+  assert.equal(getProviders().find(p => p.id === direct.id).networkProxyMode, 'system')
 })
 
 test('reserved built-in IDs and duplicate IDs cannot hijack custom records; built-in additions use trusted config', () => {

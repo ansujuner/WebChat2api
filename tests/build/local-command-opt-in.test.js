@@ -49,6 +49,10 @@ function application(options = {}) {
     },
     './updater': { UpdaterManager: { getInstance: () => ({ destroy() {} }) } },
     './store/store': { storeManager: { flushPendingWrites() {} } },
+    './diagnostics/providerNetworkProbe': { runProviderNetworkProbe: async () => {
+      calls.push({ operation: 'networkProbe' })
+      return { status: 'completed', resolutionOnly: true, providerRequestsSent: 0, checks: [] }
+    } },
     './oauth/zaiAccountBrowser': { zaiAccountBrowserManager: {
       hasOpenBrowsers: () => !!options.zaiOpen,
       destroy: async () => { calls.push({ operation: 'closeZai' }); if (options.closeZai) await options.closeZai() },
@@ -134,6 +138,18 @@ export const __fixture = {
     async second(argv) { events.get('second-instance')({}, argv); await controls.drain() },
   }
 }
+
+test('network route inspection never starts the proxy, checks accounts or submits chat', async () => {
+  const fixture = application()
+  await fixture.ready()
+  await fixture.second(['fixture-electron.exe', '--chat2api-probe=network'])
+  assert.deepEqual(fixture.calls.map(call => call.operation), ['initialize', 'networkProbe'])
+  const report = fixture.writes.at(-1).data
+  assert.equal(report.status, 'completed')
+  assert.equal(report.live, false)
+  assert.equal(report.resolutionOnly, true)
+  assert.equal(report.providerRequestsSent, 0)
+})
 
 test('existing Z.ai account restore is explicitly dispatched without proxy startup or chat generation', async () => {
   const fixture = application()

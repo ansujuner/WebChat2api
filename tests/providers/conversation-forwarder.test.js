@@ -21,6 +21,8 @@ function evaluate(file, imports = {}) {
     exports, module: { exports }, Error, Buffer, structuredClone,
     require: name => {
       if (Object.hasOwn(imports, name)) return imports[name]
+      if (name === '../network/providerContext.ts') return require('../../src/main/network/providerContext.ts')
+      if (name === '../../shared/providerNetwork') return require('../../src/shared/providerNetwork.ts')
       if (!name.startsWith('.')) return require(name)
       throw new Error(`Unmocked import: ${name}`)
     },
@@ -38,10 +40,11 @@ const providers = [
 const plain = value => JSON.parse(JSON.stringify(value))
 const consume = async stream => { let result = ''; for await (const chunk of stream) result += chunk; return result }
 
-function fixture(zaiResponse) {
+function fixture(zaiResponse, options = {}) {
   const continuityModule = evaluate('conversationContinuity.ts')
   const manager = new continuityModule.ConversationContinuity()
-  const captured = [], listeners = [], constructions = [], deletes = [], transforms = []
+  const captured = [], listeners = [], constructions = [], deletes = [], transforms = [], deleteRoutes = []
+  const network = require('../../src/main/network/providerContext.ts')
   let contextCalls = 0, failNext = false
   const makeAnswer = () => ({ id: 'upstream-thread', object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: 'fixture answer' }, finish_reason: 'stop' }] })
   const asChunks = () => `data: ${JSON.stringify({ id: 'upstream-thread', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'fixture answer' }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: 'upstream-thread', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`
@@ -79,9 +82,9 @@ function fixture(zaiResponse) {
         if (id === 'minimax' && options.stream) return { response: null, stream: { stream: Readable.from([asChunks()]) }, chatId: 'upstream-thread' }
         return { response, sessionId: 'upstream-thread', chatId: 'upstream-thread', conversationId: 'upstream-thread', reqId: 'request-id', query: 'fixture query' }
       }
-      async deleteSession(value) { deletes.push({ id, value }); return true }
-      async deleteConversation(value) { deletes.push({ id, value }); return true }
-      async deleteChat(value) { deletes.push({ id, value }); return true }
+      async deleteSession(value) { deleteRoutes.push(network.getProviderNetworkScope()); deletes.push({ id, value }); return true }
+      async deleteConversation(value) { deleteRoutes.push(network.getProviderNetworkScope()); deletes.push({ id, value }); return true }
+      async deleteChat(value) { deleteRoutes.push(network.getProviderNetworkScope()); deletes.push({ id, value }); return true }
       async generateConversationTitle() { return true }
     }
     Adapter[`is${label}Provider`] = provider => provider.id === id
@@ -97,13 +100,13 @@ function fixture(zaiResponse) {
       getSessionId() { return 'upstream-thread' }
       getAssistantContentForTitle() { return 'fixture answer' }
       async handleStream() {
-        if (id === 'zai') assert.equal(this.listener, undefined)
+        if (id === 'zai' || options.deferStreams) assert.equal(this.listener, undefined)
         else {
           assert.equal(typeof this.listener, 'function', 'listener must be connected before stream parsing')
           this.listener({ sessionId: 'upstream-thread', parentMessageId: `message-${captured.length}` })
         }
         const output = new PassThrough()
-        setImmediate(() => output.end(asChunks()))
+        if (!options.deferStreams) setImmediate(() => output.end(asChunks()))
         return output
       }
       async handleNonStream() {
@@ -125,7 +128,30 @@ function fixture(zaiResponse) {
     if (id === 'deepseek' || id === 'perplexity' || id === 'arena') imports[`./adapters/${id}-stream`] = { [`${label}StreamHandler`]: Handler }
   }
   const { RequestForwarder } = evaluate('forwarder.ts', imports)
-  return { manager, forwarder: new RequestForwarder(), captured, listeners, constructions, deletes, transforms, contextCalls: () => contextCalls, fail: () => { failNext = true } }
+  return { manager, forwarder: new RequestForwarder(), captured, listeners, constructions, deletes, deleteRoutes, transforms, contextCalls: () => contextCalls, fail: () => { failNext = true } }
+}
+
+for (const [id, method] of [['glm', 'forwardGLM'], ['kimi', 'forwardKimi'], ['qwen-ai', 'forwardQwenAi']]) {
+  test(`${id} stream completion cleanup retains original provider proxy when native end arrives in another scope`, async () => {
+    const network = require('../../src/main/network/providerContext.ts')
+    const original = { mode: 'custom', url: 'http://127.0.0.1:18421' }
+    let current = original
+    network.setProviderProxyResolver(providerId => providerId === id ? current : { mode: 'none' }, () => 'system')
+    try {
+      const f = fixture(undefined, { deferStreams: true })
+      const result = await network.withProviderNetwork(id, () => f.forwarder[method](
+        { model: 'fixture-model', stream: true, messages: [{ role: 'user', content: 'hello' }] },
+        { id: 'fixture-account', providerId: id, credentials: {} }, { id, apiEndpoint: 'https://fixture.invalid' }, 'fixture-model', Date.now(),
+      ))
+      assert.equal(result.success, true, result.error)
+      current = { mode: 'none' }
+      const completed = consume(result.stream)
+      network.withProviderNetwork('unrelated-provider', () => result.stream.end('data: [DONE]\n\n'))
+      await completed
+      assert.deepEqual(plain(f.deleteRoutes), [{ providerId: id, config: original }])
+      assert.equal(f.deletes.length, 1)
+    } finally { network.setProviderProxyResolver(() => undefined, () => 'system') }
+  })
 }
 
 for (const status of [204, 302, 403, 429, 500]) {

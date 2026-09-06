@@ -8,6 +8,7 @@ const root = join(__dirname, '..', '..')
 const plain = value => JSON.parse(JSON.stringify(value))
 const identity = require('../../src/shared/accountIdentity.ts')
 const availability = require('../../src/shared/accountAvailability.ts')
+const loginContract = require('../../src/shared/accountReauthentication.ts')
 function load(file, mocks = {}, logs = []) {
   const module = { exports: {} }
   const source = ts.transpileModule(readFileSync(join(root, file), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
@@ -23,6 +24,8 @@ function fixture(options = {}) {
   const native = { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(`cipher:${value}`), decryptString: value => value.toString().slice(7) }
   const { storeManager } = load('src/main/store/store.ts', {
     electron: { safeStorage: native }, '../../shared/accountIdentity': identity, '../../shared/accountAvailability': availability,
+    './types': { BUILTIN_PROVIDERS: loginContract.ACCOUNT_LOGIN_PROVIDERS.map(id => load(`src/main/providers/builtin/${id}.ts`).default) },
+    '../../shared/providerNetwork': require('../../src/shared/providerNetwork.ts'),
   }, logs)
   const original = { id: 'original-account', providerId: 'zai', name: 'My Original Account', nameSource: 'custom',
     providerUserId: 'website-user', email: 'person@example.test', credentials: { token: 'old-fixture-token' }, credentialRevision: 3,
@@ -39,12 +42,22 @@ function fixture(options = {}) {
   storeManager.notifyAccountsChanged = () => { notifications += 1 }
   storeManager.getConfig = () => ({ oauthProxyMode: 'none' })
   let authenticate = options.authenticate || (async () => ({ success: true, credentials: { token: 'new-fixture-token', captcha_verify_param: 'never-save-captcha' }, accountInfo: { userId: 'website-user', email: 'person@example.test' } }))
-  const calls = [], cleared = []
+  const calls = [], cleared = [], oauthCalls = [], arenaCalls = [], scopeCalls = []
   const browser = { authenticate: async request => { calls.push(plain(request)); return authenticate(request) }, clearAccount: async id => { cleared.push(id) } }
   const service = load('src/main/oauth/accountReauthentication.ts', {
-    '../store/store': { storeManager }, '../../shared/accountIdentity': identity, './zaiAccountBrowser': { zaiAccountBrowserManager: browser },
+    '../store/store': { storeManager }, '../../shared/accountIdentity': identity, '../../shared/accountReauthentication': loginContract,
+    './zaiAccountBrowser': { zaiAccountBrowserManager: browser },
+    '../network/proxy': { getProviderProxyConfig: () => options.proxyConfig || { mode: 'none' }, withProviderNetwork: async (id, task) => { scopeCalls.push(id); return task() } },
+    './manager': { oauthManager: {
+      validateToken: async (...args) => { oauthCalls.push(['validate', ...plain(args)]); return options.validate ? options.validate() : { valid: true, accountInfo: { userId: 'website-user', email: 'person@example.test' } } },
+      startInAppLogin: async (...args) => { oauthCalls.push(['login', ...plain(args)]); return options.login ? options.login() : { ...authenticated('new-fixture-token'), providerId: original.providerId } },
+    } },
+    '../arena/browserManager': { arenaBrowserManager: {
+      reauthenticate: async input => { arenaCalls.push(input); return options.arena ? options.arena(input) : { success: true, profileId: input.profileId, accountInfo: { email: 'person@example.test' } } },
+      clearProfile: async id => { cleared.push(id) },
+    } },
   }, logs)
-  return { ...service, storeManager, original, calls, cleared, logs, setAuthenticate: value => { authenticate = value },
+  return { ...service, storeManager, original, calls, cleared, logs, oauthCalls, arenaCalls, scopeCalls, setAuthenticate: value => { authenticate = value },
     snapshot: () => plain(data), counts: () => ({ writes, reads, notifications }), ignoreWrites: () => { ignored = true },
     replaceAccount: value => { data = { ...data, accounts: [value] } }, changeProvider: value => { data = { ...data, providers: [value] } } }
 }
@@ -56,7 +69,7 @@ test('account-bound login saves to the original ID through actual encrypted stor
   assert.deepEqual(plain(result), { success: true, accountId: 'original-account', state: 'updated' })
   assert.equal(f.calls.length, 1)
   assert.equal(f.calls[0].accountId, 'original-account')
-  assert.equal(f.calls[0].proxyMode, 'none')
+  assert.deepEqual(f.calls[0].proxyConfig, { mode: 'none' })
   assert.deepEqual(f.calls[0].expectedIdentity, { userId: 'website-user', email: 'person@example.test' })
   const saved = f.storeManager.getAccountById('original-account', true)
   assert.deepEqual(plain(saved.credentials), { token: 'new-fixture-token' })
@@ -223,4 +236,88 @@ test('IPC and preload expose only account ID; account and provider deletions cle
   assert.doesNotMatch(handler, /credentials|providerType|result\.credentials/)
   assert.match(handlers, /if \(deleted\) await clearAccountReauthentication\(id\)/)
   assert.match(handlers, /accountIds.map\(accountId => clearAccountReauthentication\(accountId\)\)/)
+})
+
+test('every token-based builtin signs in under its provider route and atomically saves canonical credentials to the original record', async () => {
+  const credentials = {
+    deepseek: [{ userToken: '{"value":"fresh-deepseek"}' }, { token: 'fresh-deepseek' }],
+    glm: [{ chatglm_refresh_token: 'fresh-glm' }, { refresh_token: 'fresh-glm' }],
+    kimi: [{ token: 'fresh-kimi' }, { token: 'fresh-kimi' }],
+    minimax: [{ token: 'fresh-minimax', realUserID: 'website-user' }, { token: 'fresh-minimax', realUserID: 'website-user' }],
+    mimo: [{ serviceToken: 'fresh-mimo', userId: 'website-user', xiaomichatbot_ph: 'fresh-ph' }, { service_token: 'fresh-mimo', user_id: 'website-user', ph_token: 'fresh-ph' }],
+    qwen: [{ tongyi_sso_ticket: 'fresh-qwen' }, { ticket: 'fresh-qwen' }],
+    'qwen-ai': [{ token: 'fresh-qwen-ai', cookies: '[]' }, { token: 'fresh-qwen-ai', cookies: '[]' }],
+    perplexity: [{ '__Secure-next-auth.session-token': 'fresh-perplexity' }, { sessionToken: 'fresh-perplexity' }],
+  }
+  for (const [providerId, [raw, canonical]] of Object.entries(credentials)) {
+    const f = fixture({ provider: { id: providerId }, account: { providerId, status: 'expired' },
+      proxyConfig: { mode: 'custom', url: 'http://127.0.0.1:7888' },
+      login: async () => ({ success: true, credentials: { ...raw, captcha_verify_param: 'discard-proof', unrelated_secret: 'discard-secret' }, accountInfo: { userId: 'website-user', email: 'person@example.test' } }) })
+    assert.deepEqual(plain(await f.reauthenticateAccount('original-account')), { success: true, accountId: 'original-account', state: 'updated' }, providerId)
+    assert.deepEqual(f.oauthCalls, [['login', providerId, providerId, null, { mode: 'custom', url: 'http://127.0.0.1:7888' }]])
+    assert.deepEqual(f.scopeCalls, [providerId])
+    assert.equal(f.calls.length, 0)
+    const saved = f.storeManager.getAccountById('original-account', true)
+    assert.deepEqual(plain(saved.credentials), canonical)
+    assert.equal(saved.status, 'active'); assert.equal(saved.credentialRevision, 4)
+    for (const key of ['name', 'nameSource', 'enabled', 'cooldownUntil', 'cooldownReason', 'dailyLimit', 'createdAt']) assert.equal(saved[key], f.original[key])
+    assert.equal(f.snapshot().accounts.length, 1)
+  }
+})
+
+test('generic login needs a matching identity and rejects unknown or concurrently replaced credentials without overwriting', async () => {
+  for (const kind of ['mismatch', 'missing', 'edit', 'delete']) {
+    const pending = deferred()
+    const f = fixture({ provider: { id: 'kimi' }, account: { providerId: 'kimi' }, login: () => pending.promise })
+    const task = f.reauthenticateAccount('original-account')
+    if (kind === 'edit') f.storeManager.updateAccount('original-account', { credentials: { token: 'USER-REPLACEMENT' } })
+    if (kind === 'delete') f.storeManager.deleteAccount('original-account')
+    const writes = f.counts().writes
+    pending.resolve({ success: true, credentials: { token: 'NEW' }, accountInfo: kind === 'missing' ? {} : { userId: kind === 'mismatch' ? 'other-user' : 'website-user', email: 'person@example.test' } })
+    const result = await task
+    assert.equal(result.errorCode, kind === 'missing' ? 'identity_unverified' : kind === 'mismatch' ? 'identity_mismatch' : 'account_changed')
+    assert.equal(f.counts().writes, writes)
+  }
+})
+
+test('legacy generic identity can be verified from old credentials but absent identity never gets invented from a display name', async () => {
+  const f = fixture({ provider: { id: 'kimi' }, account: { providerId: 'kimi', email: undefined, providerUserId: undefined } })
+  assert.equal((await f.reauthenticateAccount('original-account')).state, 'updated')
+  assert.equal(f.oauthCalls[0][0], 'validate'); assert.equal(f.oauthCalls[1][0], 'login')
+  for (const valid of [true, false]) {
+    const unverified = fixture({ provider: { id: 'perplexity' }, account: { providerId: 'perplexity', email: undefined, providerUserId: undefined },
+      validate: async () => ({ valid, accountInfo: { name: 'person@example.test' } }) })
+    assert.equal((await unverified.reauthenticateAccount('original-account')).errorCode, 'identity_unverified')
+    assert.equal(unverified.oauthCalls.filter(call => call[0] === 'login').length, 0)
+    assert.equal(unverified.counts().writes, 0)
+  }
+})
+
+test('Arena reauthentication preserves exact profile and settings, with scoped cancellation and stale account guard', async () => {
+  const profileId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+  const options = { provider: { id: 'arena' }, account: { providerId: 'arena', providerUserId: undefined, status: 'expired', credentials: { browserProfileId: profileId } } }
+  const f = fixture(options)
+  assert.equal((await f.reauthenticateAccount('original-account')).state, 'updated')
+  assert.equal(f.arenaCalls.length, 1)
+  assert.equal(f.arenaCalls[0].profileId, profileId)
+  assert.equal(f.arenaCalls[0].expectedEmail, 'person@example.test')
+  assert.deepEqual(plain(f.storeManager.getAccountById('original-account', true).credentials), { browserProfileId: profileId })
+  assert.equal(f.storeManager.getAccountById('original-account').enabled, false)
+  const changedRoute = fixture({ ...options, arena: async () => ({ success: false, errorCode: 'route_changed' }) })
+  assert.equal((await changedRoute.reauthenticateAccount('original-account')).errorCode, 'route_changed')
+  assert.equal(changedRoute.counts().writes, 0)
+  await f.clearAccountReauthentication('original-account')
+  assert.deepEqual(f.cleared, ['original-account', profileId])
+  for (const change of ['profile', 'identity', 'deleted']) {
+    const pending = deferred(), g = fixture({ ...options, arena: () => pending.promise })
+    const task = g.reauthenticateAccount('original-account')
+    assert.equal(g.arenaCalls[0].isAccountCurrent(), true)
+    if (change === 'deleted') g.storeManager.deleteAccount('original-account')
+    else g.storeManager.updateAccount('original-account', change === 'identity' ? { email: 'someone-else@example.test' } : { credentials: { browserProfileId: 'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee' } })
+    assert.equal(g.arenaCalls[0].isAccountCurrent(), false)
+    const writes = g.counts().writes
+    pending.resolve({ success: true, profileId, accountInfo: { email: 'person@example.test' } })
+    assert.equal((await task).errorCode, 'account_changed')
+    assert.equal(g.counts().writes, writes)
+  }
 })

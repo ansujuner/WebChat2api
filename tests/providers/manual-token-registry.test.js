@@ -5,6 +5,8 @@ function load(file, mocks) {
   const module = { exports: {} }
   vm.runInNewContext(ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText,
     { module, exports: module.exports, console: { log() {}, error() {} }, require(name) {
+      if (name === '../network/providerContext.ts' || name === '../network/providerContext') return require('../../src/main/network/providerContext.ts')
+      if (name === '../network/proxy') return require('../../src/main/network/providerContext.ts')
       assert.ok(Object.hasOwn(mocks, name), `Unmocked dependency forbidden: ${name}`); return mocks[name]
     } })
   return module.exports

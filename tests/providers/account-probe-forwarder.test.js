@@ -136,6 +136,8 @@ function fixture(providerId = 'deepseek', options = {}) {
   vm.runInNewContext(compiled, { module, exports: module.exports, Buffer, Error, Date, setTimeout, clearTimeout,
     console: { log() {}, warn() {}, error() {} }, require: name => {
       if (Object.hasOwn(imports, name)) return imports[name]
+      if (name === '../network/providerContext.ts') return require('../../src/main/network/providerContext.ts')
+      if (name === '../../shared/providerNetwork') return require('../../src/shared/providerNetwork.ts')
       if (name === 'stream') return require('node:stream')
       throw Error(`Unmocked boundary: ${name}`)
     },
@@ -179,6 +181,29 @@ test('custom probe sends max_tokens 32 once, takes fresh credentials, and never 
   assert.deepEqual(plain(config.data), { model: 'actual-model', messages: [{ role: 'user', content: '你好，请只回复 OK。' }], stream: false, max_tokens: 32 })
   assert.equal(config.headers.Authorization, `Bearer ${f.account().credentials.token}`)
   assert.deepEqual(f.changes, [])
+})
+
+test('real forwarder keeps concurrent same-host account probes on their explicit provider route', async () => {
+  const network = require('../../src/main/network/providerContext.ts')
+  const routes = { 'custom-a': { mode: 'custom', url: 'http://127.0.0.1:18421' }, 'custom-b': { mode: 'none' } }
+  const seen = []
+  network.setProviderProxyResolver(id => routes[id], () => 'system')
+  try {
+    const create = id => fixture(id, { provider: { type: 'custom', apiEndpoint: 'https://same-host.invalid/v1' }, custom: async config => {
+      await nextTurn()
+      seen.push({ url: config.url, ...plain(network.getProviderNetworkScope()) })
+      return { status: 200, headers: {}, data: answer() }
+    } })
+    const a = create('custom-a'), b = create('custom-b')
+    const results = await Promise.all([a.run(), b.run()])
+    assert.ok(results.every(result => result.success))
+    assert.equal(seen.length, 2)
+    assert.equal(seen[0].url, seen[1].url, 'routing must not infer provider from the upstream host')
+    for (const id of Object.keys(routes)) assert.deepEqual(seen.find(item => item.providerId === id)?.config, routes[id])
+    assert.equal(network.getProviderNetworkScope(), undefined)
+  } finally {
+    network.setProviderProxyResolver(() => undefined, () => 'system')
+  }
 })
 
 test('Z.ai guard binds account identity/revision and provider existence, not natural token refresh or user preferences', async () => {

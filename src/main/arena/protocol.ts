@@ -4,7 +4,7 @@ import { StringDecoder } from 'node:string_decoder'
 export type ArenaModality = 'text' | 'image'
 export interface ArenaModel { id: string; name: string; modality: ArenaModality; publicName?: string; rateLimitedUntil?: number }
 export interface ArenaConversation { id: string; modelId: string; modality: ArenaModality }
-export type ArenaErrorCode = 'action_required' | 'model_not_available' | 'invalid_request' | 'browser_unavailable' | 'account_busy' | 'incomplete_stream' | 'upstream_error' | 'aborted' | 'rate_limited' | 'quota_unavailable'
+export type ArenaErrorCode = 'action_required' | 'route_changed' | 'model_not_available' | 'invalid_request' | 'browser_unavailable' | 'account_busy' | 'incomplete_stream' | 'upstream_error' | 'aborted' | 'rate_limited' | 'quota_unavailable'
 export interface ArenaDiagnostic {
   stage: 'browser' | 'snapshot' | 'score' | 'submission' | 'stream' | 'decode'
   upstreamStatus?: number
@@ -18,6 +18,7 @@ const ISSUE_FIELDS = ['id', 'mode', 'modelAId', 'modelBId', 'modality', 'userMes
 const ISSUE_CODES = ['invalid_type', 'invalid_literal', 'custom', 'invalid_union', 'invalid_union_discriminator', 'invalid_enum_value', 'unrecognized_keys', 'invalid_arguments', 'invalid_return_type', 'invalid_date', 'invalid_string', 'too_small', 'too_big', 'invalid_intersection_types', 'not_multiple_of', 'not_finite', 'invalid_format', 'invalid_value']
 const ERRORS: Record<ArenaErrorCode, string> = {
   action_required: 'Complete Arena sign-in or verification in the account browser, then explicitly try again. No automatic retry was performed.',
+  route_changed: 'Arena network settings changed. Wait for any manual website chat to finish, then close that Arena browser window and try again. No new request was sent using the previous route.',
   model_not_available: 'This model is not available in the current Arena catalog. Refresh the account model list.',
   invalid_request: 'The Arena request or conversation identifier is invalid.',
   browser_unavailable: 'The Arena account browser is unavailable. Open the account login window and try again.',
@@ -35,8 +36,8 @@ export class ArenaError extends Error {
   readonly retryAt?: number
   constructor(readonly code: ArenaErrorCode, diagnostic?: ArenaDiagnostic, retryAt?: number) {
     super(ERRORS[code]); this.name = 'ArenaError'
-    this.status = code === 'rate_limited' ? 429 : code === 'quota_unavailable' ? 503 : code === 'invalid_request' ? 400 : code === 'model_not_available' ? 404 : code === 'account_busy' ? 409 : code === 'action_required' ? 409 : 502
-    this.actionRequired = code === 'action_required'
+    this.status = code === 'rate_limited' ? 429 : code === 'quota_unavailable' ? 503 : code === 'invalid_request' ? 400 : code === 'model_not_available' ? 404 : ['account_busy', 'action_required', 'route_changed'].includes(code) ? 409 : 502
+    this.actionRequired = code === 'action_required' || code === 'route_changed'
     if (Number.isSafeInteger(retryAt) && retryAt! > 0) this.retryAt = retryAt
     if (diagnostic && ['browser', 'snapshot', 'score', 'submission', 'stream', 'decode'].includes(diagnostic.stage)) {
       this.diagnostic = Object.freeze({ stage: diagnostic.stage,

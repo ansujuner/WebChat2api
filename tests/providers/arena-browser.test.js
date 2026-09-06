@@ -55,7 +55,9 @@ function managerFixture(globals = {}) {
     './rateLimit': { getArenaRateLimiter: () => quota, isArenaQuotaAccountId: rateLimits.isArenaQuotaAccountId },
     './protocol': protocol, './pageScripts': scripts,
     electron: { app: { getPath(name) { assert.equal(name, 'userData'); return files.appDirectory } } },
-    '../store/store': { storeManager: { getConfig: () => ({ ...config }) } },
+    '../store/store': { storeManager: { getConfig: () => ({ ...config }), getAccountById: () => ({ id: 'fixture-account', providerId: 'arena', email: snapshot.accountInfo.email, credentials: { browserProfileId: profileId } }) } },
+    '../network/proxy': { getProviderProxyConfig: () => config.proxyConfig || { mode: config.oauthProxyMode } },
+    '../../shared/accountIdentity': require('../../src/shared/accountIdentity.ts'),
     '../oauth/browserDiscovery': {
       findInstalledLoginBrowser: async () => { throw Error('Tests must not discover installed browsers') },
       loginBrowserArguments: () => { throw Error('Tests must not launch a browser') },
@@ -66,7 +68,7 @@ function managerFixture(globals = {}) {
     'node:fs/promises': files.api,
   }, globals)
   const manager = new api.ArenaBrowserManager()
-  const context = { pipe: { async send(method, params) { calls.push({ method, params }); return {} } }, exited: () => false, proxyMode: 'none' }
+  const context = { pipe: { async send(method, params) { calls.push({ method, params }); return {} } }, exited: () => false, proxyConfig: { mode: 'none' } }
   const wire = () => {
     manager.context = async (id, signal, requestOwner) => { calls.push({ operation: 'context', id, requestOwner }); return context }
     manager.page = async () => ({ targetId: 'owned-arena-page', sessionId: 'owned-session' })
@@ -295,20 +297,112 @@ test('Arena successful login retains its owned browser; cancellation closes only
   assert.doesNotMatch(JSON.stringify(cancelled), /fixture-cookie/)
 })
 
-test('Arena context reads actual saved proxy mode and never replaces an in-use browser for external status', async () => {
+test('Arena context refuses a changed route without closing even an API-idle visible browser', async () => {
   const f = managerFixture(), launches = [], closed = []
-  f.manager.launch = async (id, proxyMode) => { launches.push(proxyMode); return { ...f.context, proxyMode } }
+  f.manager.launch = async (id, proxyConfig) => { launches.push(plain(proxyConfig)); return { ...f.context, proxyConfig } }
   f.manager.closeProfile = async id => { closed.push(id); f.manager.browsers.delete(id) }
   await f.manager.context(profileId)
-  assert.deepEqual(launches, ['none'])
+  assert.deepEqual(launches, [{ mode: 'none' }])
   assert.equal(f.manager.hasOpenBrowsers(), true)
   f.config.oauthProxyMode = 'system'
   f.manager.busyProfiles.add(profileId)
-  await rejectsCode(f.manager.context(profileId), 'account_busy')
+  await rejectsCode(f.manager.context(profileId), 'route_changed')
   assert.equal(closed.length, 0)
-  await f.manager.context(profileId, undefined, true)
-  assert.deepEqual(launches, ['none', 'system'])
-  assert.equal(closed.length, 1)
+  await rejectsCode(f.manager.context(profileId, undefined, true), 'route_changed')
+  f.manager.busyProfiles.delete(profileId)
+  await rejectsCode(f.manager.context(profileId), 'route_changed')
+  assert.deepEqual(launches, [{ mode: 'none' }])
+  assert.equal(closed.length, 0)
+})
+
+test('Arena existing-account login reuses exactly the owned profile and returns only verified matching email', async () => {
+  const f = managerFixture(); f.wire()
+  await f.api.arenaProfileDirectory(profileId, true)
+  const files = [...f.files.entries.keys()]
+  const result = await f.manager.reauthenticate({ profileId, expectedEmail: snapshot.accountInfo.email.toUpperCase(), isAccountCurrent: () => true })
+  assert.deepEqual(plain(result), { success: true, profileId, accountInfo: { email: snapshot.accountInfo.email } })
+  assert.deepEqual([...f.files.entries.keys()], files, 'Re-login must not create another profile')
+  assert.equal(f.calls.find(call => call.operation === 'context').id, profileId)
+  assert.ok(f.calls.some(call => call.method === 'Page.bringToFront'))
+  assert.ok(f.calls.some(call => call.method === 'Target.detachFromTarget'))
+  assert.equal(f.calls.some(call => call.method === 'Browser.close'), false)
+  assert.equal(f.manager.busyProfiles.size, 0)
+  assert.equal(f.manager.isWindowOpen(), false)
+})
+
+test('Arena wrong identity, missing original profile and a deleted account never return a replacement login', async () => {
+  for (const kind of ['identity', 'missing-profile', 'deleted']) {
+    const f = managerFixture(); f.wire()
+    if (kind !== 'missing-profile') await f.api.arenaProfileDirectory(profileId, true)
+    const result = await f.manager.reauthenticate({ profileId, expectedEmail: kind === 'identity' ? 'other@example.test' : snapshot.accountInfo.email,
+      isAccountCurrent: () => kind !== 'deleted' })
+    assert.equal(result.success, false)
+    assert.equal(result.errorCode, kind === 'identity' ? 'identity_mismatch' : kind === 'deleted' ? 'account_changed' : 'browser_error')
+    assert.equal(result.profileId, undefined)
+    assert.equal(f.manager.busyProfiles.size, 0)
+  }
+})
+
+test('Arena re-login locks only its profile and rejects stale results after cancellation or account replacement', async () => {
+  for (const change of ['cancel', 'account']) {
+    const f = managerFixture(); f.wire(); await f.api.arenaProfileDirectory(profileId, true)
+    let resolve, current = true
+    f.manager.readyPage = () => new Promise(done => { resolve = done })
+    const task = f.manager.reauthenticate({ profileId, expectedEmail: snapshot.accountInfo.email, isAccountCurrent: () => current })
+    await tick()
+    assert.equal((await f.manager.reauthenticate({ profileId, expectedEmail: snapshot.accountInfo.email, isAccountCurrent: () => true })).errorCode, 'busy')
+    await rejectsCode(f.manager.chat({ accountId: 'fixture-account', profileId, model: 'max', prompt: 'not sent' }), 'account_busy')
+    if (change === 'cancel') f.manager.cancel(); else current = false
+    resolve({ snapshot, targetId: 'owned-page', sessionId: 'owned-session' })
+    const result = await task
+    assert.equal(result.success, false)
+    assert.equal(result.errorCode, change === 'cancel' ? 'cancelled' : 'account_changed')
+    assert.equal(f.manager.busyProfiles.size, 0)
+  }
+})
+
+test('Arena custom proxy URL changes require the user to close the old browser before the same profile can reopen', async () => {
+  const f = managerFixture(), launches = [], closed = []
+  f.config.proxyConfig = { mode: 'custom', url: 'http://127.0.0.1:7888' }
+  f.manager.launch = async (id, proxyConfig) => { launches.push({ id, config: plain(proxyConfig) }); return { ...f.context, proxyConfig } }
+  f.manager.closeProfile = async id => { closed.push(id); f.manager.browsers.delete(id) }
+  await f.manager.context(profileId)
+  f.config.proxyConfig = { mode: 'custom', url: 'socks5://127.0.0.1:7999' }
+  f.manager.busyProfiles.add(profileId)
+  await rejectsCode(f.manager.context(profileId), 'route_changed')
+  assert.equal(closed.length, 0)
+  f.manager.busyProfiles.delete(profileId)
+  await rejectsCode(f.manager.context(profileId), 'route_changed')
+  assert.equal(closed.length, 0); assert.equal(launches.length, 1)
+  const old = await f.manager.browsers.get(profileId)
+  old.exited = () => true // Only an actual user-closed browser can now be replaced.
+  await f.manager.context(profileId)
+  assert.deepEqual(launches, [{ id: profileId, config: { mode: 'custom', url: 'http://127.0.0.1:7888' } }, { id: profileId, config: { mode: 'custom', url: 'socks5://127.0.0.1:7999' } }])
+  assert.deepEqual(closed, [profileId])
+})
+
+test('Arena route_changed is a fixed action-required error before auth, quota reservation or website submission', async () => {
+  const f = managerFixture()
+  await f.api.arenaProfileDirectory(profileId, true)
+  f.manager.browsers.set(profileId, Promise.resolve(f.context))
+  f.config.proxyConfig = { mode: 'custom', url: 'http://127.0.0.1:7888' }
+  const error = await f.manager.chat({ accountId: 'fixture-account', profileId, model: 'max', prompt: 'not sent' }).catch(error => error)
+  assert.equal(error.code, 'route_changed'); assert.equal(error.status, 409); assert.equal(error.actionRequired, true)
+  assert.match(error.message, /manual website chat/)
+  assert.equal(f.calls.some(call => call.method === 'Browser.close' || call.operation === 'evaluate'), false)
+  assert.equal(f.manager.busyProfiles.size, 0)
+  const login = await f.manager.reauthenticate({ profileId, expectedEmail: snapshot.accountInfo.email, isAccountCurrent: () => true })
+  assert.deepEqual(plain(login), { success: false, errorCode: 'route_changed' })
+  assert.deepEqual(plain(await f.manager.status(profileId)), { authenticated: false, actionRequired: true, errorCode: 'route_changed' })
+  assert.equal(f.calls.some(call => call.method === 'Browser.close'), false)
+})
+
+test('Arena website identity switch blocks generation before model reservation or submission', async () => {
+  const f = managerFixture(); f.wire()
+  f.manager.readyPage = async () => ({ sessionId: 'owned-session', snapshot: { ...snapshot, accountInfo: { email: 'other@example.test' } } })
+  await rejectsCode(f.manager.chat({ accountId: 'fixture-account', profileId, model: 'max', prompt: 'not sent' }), 'action_required')
+  assert.equal(f.calls.filter(call => call.expression?.includes('const controller =')).length, 0)
+  assert.equal(f.manager.busyProfiles.size, 0)
 })
 
 test('Arena chat returns raw terminal stream and locks one account until resource release', async () => {

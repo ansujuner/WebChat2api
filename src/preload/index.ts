@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IpcChannels } from '../main/ipc/channels'
 import type { AccountLivenessInput, AccountLivenessJob } from '../shared/accountLiveness'
 import type { AccountReauthenticationResult } from '../shared/accountReauthentication'
+import type { ProviderNetworkStatus, ProviderNetworkProxyMode } from '../shared/providerNetwork'
 import type { 
   Provider, 
   Account, 
@@ -68,6 +69,8 @@ const providersAPI = {
     ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_BUILTIN),
   
   add: (data: {
+    networkProxyMode?: ProviderNetworkProxyMode
+    networkProxyUrl?: string
     name: string
     authType: AuthType
     apiEndpoint: string
@@ -80,6 +83,9 @@ const providersAPI = {
   
   update: (id: string, updates: Partial<Provider>): Promise<Provider | null> => 
     ipcRenderer.invoke(IpcChannels.PROVIDERS_UPDATE, id, updates),
+
+  getNetworkStatus: (id: string): Promise<ProviderNetworkStatus> =>
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_NETWORK_STATUS, id),
   
   delete: (id: string): Promise<boolean> => 
     ipcRenderer.invoke(IpcChannels.PROVIDERS_DELETE, id),

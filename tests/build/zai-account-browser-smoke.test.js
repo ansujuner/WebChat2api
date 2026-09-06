@@ -14,15 +14,19 @@ const prompts = ['你好，请只回复 OK。', '记住标记 ZAI-FIXTURE-FIRST�
 // No Electron process, website, user profile, or generation is opened by this test.
 async function website() {
   const stop = new Error('Fixture-only setup boundary')
-  let handler, originalToken, unhandled = false
+  let handler, originalToken, unhandled = false, revoked = false
   const session = {
     webRequest: { onBeforeRequest() {} },
     protocol: {
       handle(scheme, value) { assert.equal(scheme, 'https'); handler = value },
-      unhandle(scheme) { assert.equal(scheme, 'https'); unhandled = true },
+      unhandle(scheme) { assert.equal(scheme, 'https'); assert.equal(revoked, true); unhandled = true },
     },
   }
   await assert.rejects(fixture({
+    allowFixtureOrigin(target, allowed) {
+      assert.equal(target, session); assert.equal(allowed, origin); assert.equal(typeof handler, 'function')
+      return () => { revoked = true }
+    },
     app: { on(event, listener) { assert.equal(event, 'session-created'); listener(session) }, off() {} },
     invoke: async expression => {
       assert.ok(expression.startsWith('window.electronAPI.accounts.add('))
@@ -43,7 +47,7 @@ async function website() {
 test('Z.ai production fixture wires the real IPC and loopback route, not mocked account handlers', () => {
   const harness = fs.readFileSync(path.join(root, 'scripts/smoke-app.cjs'), 'utf8')
   const source = fs.readFileSync(path.join(root, 'scripts/smoke-zai-account-browser.cjs'), 'utf8')
-  assert.match(harness, /require\('\.\/smoke-zai-account-browser\.cjs'\)\(\{ invoke, check, app, BrowserWindow, port, request \}\)/)
+  assert.match(harness, /require\('\.\/smoke-zai-account-browser\.cjs'\)\(\{ invoke, check, app, BrowserWindow, port, request, allowFixtureOrigin \}\)/)
   assert.match(harness, /productionProfileUsed: false/)
   assert.match(source, /call\('livenessStart', \{ accountIds: \[accountId\] \}\)/)
   assert.equal((source.match(/await request\(port, '\/v1\/chat\/completions'/g) || []).length, 2)
@@ -107,6 +111,12 @@ test('actual Z.ai fixture serves idless SSE and persisted scoped graph across bo
       assert.equal((await send('/c/' + chatId)).status, 200, 'Continuation navigation uses the existing browser graph')
     }
   }
+})
+
+test('background settings check is a negative read-only fixture, not browser identity proof', async () => {
+  const { send, headers } = await website()
+  assert.equal((await send('/api/v1/users/user/settings', { headers })).status, 401)
+  assert.equal((await send('/api/v1/users/user/settings', { method: 'POST', headers })).status, 400)
 })
 
 test('Z.ai fixture rejects unknown graph scope and credentials without touching a website', async () => {

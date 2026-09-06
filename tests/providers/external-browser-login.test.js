@@ -23,6 +23,8 @@ function load(relative, overrides = {}, globals = {}) {
     console: { log() { throw new Error('Login must not log credentials') }, error() { throw new Error('Login must not log raw errors') }, warn() {} },
     require(name) {
       if (Object.hasOwn(overrides, name)) return overrides[name]
+      if (name === '../network/providerContext.ts') return require('../../src/main/network/providerContext.ts')
+      if (name === '../../shared/providerNetwork') return require('../../src/shared/providerNetwork.ts')
       if (name.startsWith('.') || name === 'electron') throw new Error(`Unmocked dependency ${name}`)
       return require(name)
     }, ...globals,
@@ -100,10 +102,25 @@ test('browser arguments preserve native identity, full security, isolated profil
     assert.ok(!args.some(value => /remote-debugging-port|enable-automation|headless|user-agent|disable-blink|disable-web-security|no-sandbox|ignore-certificate|load-extension|profile-directory/.test(value)))
   }
   assert.throws(() => discovery.loginBrowserArguments('relative-profile', 'system'), /absolute/)
-  assert.throws(() => discovery.loginBrowserArguments(profile, 'auto'), /proxy mode/)
+  assert.throws(() => discovery.loginBrowserArguments(profile, 'auto'), /Invalid network proxy configuration/)
   const input = { HTTPS_PROXY: 'fixture-secret', http_proxy: 'fixture-secret', ALL_PROXY: 'fixture-secret', NO_PROXY: '*', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect', NODE_EXTRA_CA_CERTS: 'fixture', SSLKEYLOGFILE: 'fixture', PSModulePath: 'incompatible-parent-shell-modules', PATH: 'keep', HOME: 'keep' }
   assert.deepEqual(plain(discovery.browserChildEnvironment(input)), { PATH: 'keep', HOME: 'keep' })
   assert.equal(input.HTTPS_PROXY, 'fixture-secret')
+})
+
+test('external browser custom proxy is an explicit validated route, never an insecure flag or authenticated URL', () => {
+  const profile = path.join(root, '.audit-cache', 'fixture-profile-not-created')
+  for (const scheme of ['http', 'https', 'socks5']) {
+    const url = `${scheme}://127.0.0.1:18421`
+    const args = discovery.loginBrowserArguments(profile, { mode: 'custom', url })
+    assert.ok(args.includes(`--proxy-server=${url}`))
+    assert.ok(args.includes('--proxy-bypass-list=<-loopback>'))
+    assert.ok(!args.includes('--no-proxy-server'))
+    assert.ok(!args.some(arg => /disable-web-security|ignore-certificate|no-sandbox/.test(arg)))
+  }
+  for (const url of ['http://user:private@127.0.0.1:18421', 'http://127.0.0.1', 'http://127.0.0.1:18421/--no-sandbox']) {
+    assert.throws(() => discovery.loginBrowserArguments(profile, { mode: 'custom', url }))
+  }
 })
 
 function discoveryFixture({ status = 'Valid', subject = 'CN=Google LLC, O=Google LLC, C=US', canonical, file = true, signatureError } = {}) {

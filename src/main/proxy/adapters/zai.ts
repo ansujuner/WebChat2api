@@ -1,3 +1,4 @@
+import type { ProviderProxyConfig } from '../../network/providerContext.ts'
 /**
  * Z.ai Adapter
  * Implements Z.ai (GLM International) API protocol
@@ -168,6 +169,7 @@ interface ChatCompletionRequest extends ConversationRequestOptions {
   chatId?: string
   parentMessageId?: string
   proxyMode?: 'system' | 'none'
+  proxyConfig?: ProviderProxyConfig
   /** Main-only account binding guard; never part of website JSON or renderer IPC. */
   isAccountCurrent?: () => boolean
 }
@@ -277,7 +279,7 @@ export class ZaiAdapter {
         accountId: this.account.id,
         credentials: { ...this.account.credentials },
         expectedIdentity: { userId: this.account.providerUserId, email: this.account.email },
-        proxyMode: request.proxyMode ?? 'system',
+        ...(request.proxyConfig ? { proxyConfig: request.proxyConfig } : request.proxyMode ? { proxyMode: request.proxyMode } : {}),
         model: mappedModel, prompt,
         ...(request.conversation ? { conversation: { ...request.conversation } } : {}),
         webSearch: enableWebSearch, thinking: enableThinking, signal: request.signal,

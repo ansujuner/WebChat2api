@@ -41,6 +41,7 @@ import {
 import type { Account, AccountStatus } from '@/types/electron'
 import { cn } from '@/lib/utils'
 import { shortAccountId } from '../../../../shared/accountIdentity'
+import { supportsAccountLogin } from '../../../../shared/accountReauthentication'
 import { accountAvailability } from '../../../../shared/accountAvailability'
 import { AccountAvailabilityControl } from './AccountAvailabilityControl'
 
@@ -257,6 +258,10 @@ export function AccountList({
 
                     <div className="flex items-center gap-2">
                       <AccountAvailabilityControl account={account} />
+                      <Button size="sm" variant="outline" data-testid="account-relogin-entry" disabled={livenessBusy || isValidating}
+                        onClick={event => { event.stopPropagation(); onEditAccount(account) }}>
+                        <RefreshCw className="mr-1 h-4 w-4" />{t(supportsAccountLogin(providerId) ? 'providers.relogin' : 'providers.updateCredentials')}
+                      </Button>
                       <Button size="sm" variant="outline" disabled={livenessBusy}
                         title={t('accountLiveness.singleHint')}
                         onClick={event => { event.stopPropagation(); onTestAccount(account.id) }}>

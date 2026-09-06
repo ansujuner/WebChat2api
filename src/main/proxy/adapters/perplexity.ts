@@ -342,7 +342,7 @@ export class PerplexityAdapter {
     const data = this.buildRequestData(query, model, request.conversation)
 
     // Share the configured OS/PAC or direct route, but never another account's cookies.
-    const networkSession = await getNetworkSession()
+    const networkSession = await getNetworkSession(this.provider.id)
     const request_ = net.request({
       method: 'POST',
       url: QUERY_ENDPOINT,
@@ -512,7 +512,7 @@ export class PerplexityAdapter {
         read_write_token: sessionData.read_write_token || '',
       }
 
-      const networkSession = await getNetworkSession()
+      const networkSession = await getNetworkSession(this.provider.id)
       return new Promise((resolve) => {
         const request_ = net.request({
           method: 'DELETE',
@@ -584,7 +584,7 @@ export class PerplexityAdapter {
       'x-perplexity-request-try-number': '1',
     }
 
-    const networkSession = await getNetworkSession()
+    const networkSession = await getNetworkSession(this.provider.id)
     return new Promise((resolve) => {
       const request_ = net.request({
         method: 'DELETE',

@@ -7,6 +7,8 @@ const vm = require('node:vm')
 const ts = require('typescript')
 
 const root = join(__dirname, '../..')
+const networkContext = require('../../src/main/network/providerContext.ts')
+test.afterEach(() => networkContext.setProviderProxyResolver(() => undefined, () => 'system'))
 const plain = value => JSON.parse(JSON.stringify(value))
 const tick = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
@@ -21,6 +23,8 @@ function load(relative, overrides = {}, globals = {}) {
     console: { log() { throw new Error('Login must not log credentials') }, error() { throw new Error('Login must not log raw errors') }, warn() {} },
     require(name) {
       if (Object.hasOwn(overrides, name)) return overrides[name]
+      if (name === '../network/providerContext.ts') return require('../../src/main/network/providerContext.ts')
+      if (name === '../../shared/providerNetwork') return require('../../src/shared/providerNetwork.ts')
       if (name.startsWith('.')) throw new Error(`Unmocked dependency ${name}`)
       return require(name)
     }, ...globals,
@@ -111,7 +115,7 @@ test('login awaits explicit proxy configuration before creating browser or navig
   proxy.resolve()
   await tick()
   assert.deepEqual(f.order.slice(0, 5), ['proxy-start', 'proxy-ready', 'window', 'interception', 'navigate'])
-  assert.equal(f.sessions[0].mode, 'none')
+  assert.deepEqual(plain(f.sessions[0].mode), { mode: 'none' })
   const prefs = f.windows[0].options.webPreferences
   assert.equal(prefs.nodeIntegration, false)
   assert.equal(prefs.contextIsolation, true)
@@ -136,7 +140,7 @@ test('login uses distinct ephemeral sessions for successive accounts and removes
   assert.equal(f.sessions[0].interceptor, null)
   assert.equal(f.sessions[0].cleared, true)
   assert.equal(f.sessions[0].cookies.listenerCount('changed'), 0)
-  assert.equal(f.sessions[1].mode, 'system')
+  assert.deepEqual(plain(f.sessions[1].mode), { mode: 'system' })
   f.manager.cancel()
   await second
   assert.equal(f.timeouts.size, 0)
@@ -312,12 +316,37 @@ function oauthFixture(validateToken) {
   return { manager, embedded, external, get browser() { return lastBrowser } }
 }
 
+test('OAuth browser and native token callbacks retain the same provider proxy snapshot across edits', async () => {
+  const original = { mode: 'custom', url: 'socks5://127.0.0.1:18421' }
+  let route = original
+  networkContext.setProviderProxyResolver(id => id === 'deepseek' ? route : { mode: 'none' }, () => 'system')
+  const seen = []
+  const f = oauthFixture(async () => {
+    await tick()
+    seen.push(plain(networkContext.getProviderNetworkScope()))
+    return { valid: true }
+  })
+  const first = f.manager.startInAppLogin('deepseek', 'deepseek')
+  assert.deepEqual(plain(f.external.options.proxyConfig), original)
+  route = { mode: 'none' }
+  // A native EventEmitter can deliver the token event in an unrelated request's context.
+  networkContext.withProviderNetwork('other-provider', () => f.external.emit('tokenFound', { key: 'token', value: 'synthetic-only' }))
+  assert.equal((await first).success, true)
+  assert.deepEqual(seen, [{ providerId: 'deepseek', config: original }])
+  const second = f.manager.startInAppLogin('deepseek', 'deepseek')
+  assert.deepEqual(plain(f.external.options.proxyConfig), { mode: 'none' })
+  f.manager.cancelInAppLogin()
+  assert.equal((await second).success, false)
+  assert.equal(networkContext.getProviderNetworkScope(), undefined)
+})
+
 test('DeepSeek OAuth selects only external browser login, validates its token, and ignores embedded events', async () => {
   const seen = []
   const f = oauthFixture(async credentials => { seen.push(plain(credentials)); return { valid: true, accountInfo: { email: 'external@example.test' } } })
   assert.notEqual(f.embedded, f.external)
-  const result = f.manager.startInAppLogin('fixture-deepseek-provider', 'deepseek', 120000, 'none')
-  assert.deepEqual(f.external.starts, [{ providerId: 'fixture-deepseek-provider', providerType: 'deepseek', timeout: 120000, proxyMode: 'none' }])
+  networkContext.setProviderProxyResolver(id => id === 'fixture-deepseek-provider' ? { mode: 'none' } : undefined, () => 'system')
+  const result = f.manager.startInAppLogin('fixture-deepseek-provider', 'deepseek', 120000, { mode: 'none' })
+  assert.deepEqual(f.external.starts, [{ providerId: 'fixture-deepseek-provider', providerType: 'deepseek', timeout: 120000, proxyConfig: { mode: 'none' } }])
   assert.equal(f.embedded.starts.length, 0)
   assert.equal(f.embedded.listenerCount('tokenFound'), 0)
   assert.equal(f.embedded.listenerCount('status'), 0)
@@ -369,12 +398,13 @@ test('OAuth manager preserves only successfully validated account identity and n
     assert.deepEqual(plain(credentials), { userToken: 'fixture-secret' })
     return { valid: true, accountInfo }
   })
-  const result = f.manager.startInAppLogin('deepseek', 'deepseek', undefined, 'none')
+  networkContext.setProviderProxyResolver(id => id === 'deepseek' ? { mode: 'none' } : undefined, () => 'system')
+  const result = f.manager.startInAppLogin('deepseek', 'deepseek', undefined, { mode: 'none' })
   f.browser.emit('tokenFound', { key: 'userToken', value: 'fixture-secret' })
   const response = await result
   assert.equal(response.success, true)
   assert.deepEqual(plain(response.accountInfo), accountInfo)
-  assert.equal(f.browser.options.proxyMode, 'none')
+  assert.deepEqual(plain(f.browser.options.proxyConfig), { mode: 'none' })
   assert.equal(f.browser.listenerCount('tokenFound'), 0)
   assert.equal(f.browser.listenerCount('status'), 0)
   assert.equal(f.manager.getStatus(), 'idle')

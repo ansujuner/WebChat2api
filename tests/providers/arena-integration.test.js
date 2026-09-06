@@ -24,6 +24,8 @@ function load(file, mocks) {
       if (name === 'node:timers') return require('node:timers')
       if (name === '../arena/rateLimit') return { getArenaModelAvailability: () => ({ available: true, reason: 'ready' }) }
       if (Object.hasOwn(mocks, name)) return mocks[name]
+      if (name === '../network/providerContext.ts') return require('../../src/main/network/providerContext.ts')
+      if (name === '../../shared/providerNetwork') return require('../../src/shared/providerNetwork.ts')
       if (['events', 'node:events', 'node:path', 'path'].includes(name)) return require(name)
       throw new Error(`Isolated Arena fixture forbids unmocked dependency: ${name}`)
     },
@@ -187,7 +189,7 @@ test('Arena account storage rejects credential imports on create and update', as
 test('Arena login UI defaults to browser-only, describes profile storage, and exposes refresh-model action', () => {
   for (const name of ['AddProviderDialog', 'AddAccountDialog']) {
     const source = readFileSync(join(root, `src/renderer/src/components/providers/${name}.tsx`), 'utf8')
-    assert.match(source, /'arena'\]\s*\.includes/)
+    assert.match(source, name === 'AddAccountDialog' ? /supportsAccountLogin\(provider\.id\)/ : /'arena'\]\s*\.includes/)
     assert.match(source, /setActiveTab\([^\n]*'arena' \? 'oauth' : 'manual'\)/)
     assert.match(source, /!== 'arena' && <TabsTrigger value="manual"/)
     assert.match(source, /arena\.profileOnlyHelp/)

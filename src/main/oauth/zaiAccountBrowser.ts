@@ -2,7 +2,8 @@
 import { BrowserWindow, session, type Session } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { accountEmail, accountUserId } from '../../shared/accountIdentity'
-import { applyProxyToSession } from '../network/proxy'
+import { getProviderProxyConfig, normalizeNetworkProxyConfig, type ProviderProxyConfig } from '../network/proxy'
+import { OwnedSessionProxy } from '../network/sessionProxy'
 
 const ORIGIN = 'https://chat.z.ai'
 const AUTH_PATH = '/api/v1/auths/'
@@ -16,6 +17,7 @@ export interface ZaiAccountBrowserOptions {
   credentials: Record<string, string>
   expectedIdentity: { userId?: string; email?: string }
   proxyMode?: 'system' | 'none'
+  proxyConfig?: ProviderProxyConfig
   /** API requests verify silently and never wait for an interactive login. */
   interactive?: boolean
   signal?: AbortSignal
@@ -41,6 +43,8 @@ interface Operation {
 interface AccountBrowser {
   accountId: string
   session: Session
+  network: OwnedSessionProxy
+  proxyConfig?: ProviderProxyConfig
   window?: BrowserWindow
   chatWindow?: BrowserWindow
   canFocus: boolean
@@ -130,6 +134,9 @@ export class ZaiAccountBrowserManager {
       return Promise.resolve({ success: false, errorCode: 'browser_error' })
     }
     if (options.signal?.aborted) return Promise.resolve({ success: false, errorCode: 'cancelled' })
+    let proxyConfig: ProviderProxyConfig
+    try { proxyConfig = normalizeNetworkProxyConfig(options.proxyConfig ?? options.proxyMode ?? getProviderProxyConfig('zai')) }
+    catch { return Promise.resolve({ success: false, errorCode: 'browser_error' }) }
     if (this.chatLocks.has(options.accountId) && options.interactive !== false) return Promise.resolve({ success: false, errorCode: 'busy' })
     const expected = options.expectedIdentity ?? {}
     const userId = accountUserId(expected.userId)
@@ -144,8 +151,9 @@ export class ZaiAccountBrowserManager {
     }
     if (!entry) {
       try {
+        const ownedSession = session.fromPartition(`zai-account-${randomUUID()}`)
         entry = {
-          accountId: options.accountId, session: session.fromPartition(`zai-account-${randomUUID()}`),
+          accountId: options.accountId, session: ownedSession, network: new OwnedSessionProxy(ownedSession),
           children: new Set(), ready: Promise.resolve(), disposed: false, initializing: true, authenticated: false, stage: 'opening', canFocus: options.interactive !== false,
         }
         this.accounts.set(options.accountId, entry)
@@ -171,7 +179,11 @@ export class ZaiAccountBrowserManager {
     const savedToken = tokenValue(options.credentials.token)
     const work = current.ready.then(async () => {
       if (!this.current(current, operation)) return
-      if (!current.window) await this.createWindow(current, options.proxyMode ?? 'system', operation)
+      if (!current.window) await this.createWindow(current, proxyConfig, operation)
+      else if (JSON.stringify(current.proxyConfig) !== JSON.stringify(proxyConfig)) {
+        await current.network.apply(proxyConfig)
+        current.proxyConfig = proxyConfig
+      }
       if (!this.current(current, operation)) return
       // Reuse a live account browser, but import an explicitly changed encrypted account token.
       if (savedToken && fingerprint(savedToken) !== current.importedFingerprint) {
@@ -182,7 +194,9 @@ export class ZaiAccountBrowserManager {
       await this.check(current, operation)
     }).catch(error => {
       current.nativeErrorCode = nativeErrorCode(error)
-      if (this.current(current, operation)) this.finish(current, operation, { success: false, errorCode: 'browser_error' })
+      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'busy')) current.proxyConfig = undefined
+      if (this.current(current, operation)) this.finish(current, operation, { success: false,
+        errorCode: error && typeof error === 'object' && 'code' in error && error.code === 'busy' ? 'busy' : 'browser_error' })
     }).finally(() => { if (current.ready === work) current.initializing = false })
     current.ready = work
     return promise
@@ -249,6 +263,7 @@ export class ZaiAccountBrowserManager {
     if (!entry) return
     this.accounts.delete(accountId)
     entry.disposed = true
+    entry.network.dispose()
     entry.authenticated = false
     if (entry.operation) this.finish(entry, entry.operation, { success: false, errorCode: 'cancelled' })
     for (const child of entry.children) { if (!child.isDestroyed()) child.destroy() }
@@ -273,8 +288,11 @@ export class ZaiAccountBrowserManager {
     if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus() }
   }
 
-  private async createWindow(entry: AccountBrowser, mode: 'system' | 'none', operation: Operation): Promise<void> {
-    await applyProxyToSession(entry.session, mode)
+  private async createWindow(entry: AccountBrowser, config: ProviderProxyConfig, operation: Operation): Promise<void> {
+    if (JSON.stringify(entry.proxyConfig) !== JSON.stringify(config)) {
+      await entry.network.apply(config)
+      entry.proxyConfig = config
+    }
     if (!this.current(entry, operation)) return
     const window = new BrowserWindow({
       width: 1060, height: 780, minWidth: 640, minHeight: 480, show: false, title: 'Z.ai', autoHideMenuBar: true,

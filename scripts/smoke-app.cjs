@@ -92,17 +92,14 @@ function runChild() {
     report.cleanQuit = true
     write()
   })
-  const isolateRequests = target => target.webRequest.onBeforeRequest(
-    { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
-    (details, callback) => {
-      const url = new URL(details.url)
-      if (url.hostname === '127.0.0.1' && url.pathname === '/v0/management/tool-calling/status') {
-        // Record only the local address, never headers or any credential value.
-        managementRequests.push({ host: url.hostname, port: Number(url.port), path: url.pathname })
-      }
-      callback({ cancel: url.hostname !== '127.0.0.1' })
+  const requestIsolation = require('./smoke-request-guard.cjs').createSmokeRequestIsolation({
+    onLoopbackRequest: route => {
+      // Retain no headers, query strings or credential values.
+      if (route.path === '/v0/management/tool-calling/status') managementRequests.push(route)
     },
-  )
+  })
+  const isolateRequests = requestIsolation.install
+  const allowFixtureOrigin = requestIsolation.allowFixtureOrigin
   app.on('session-created', isolateRequests)
   app.on('browser-window-created', (_, window) => {
     // Test fixture only: keep the real production renderer hidden, not disabled.
@@ -389,6 +386,7 @@ function runChild() {
 
     await require('./smoke-custom-tools.cjs')({ invoke, check, port })
     await require('./smoke-account-relogin.cjs')({ invoke, check, ipcMain })
+    await require('./smoke-provider-network.cjs')({ invoke, check, ipcMain })
 
     // Fake account in the isolated profile only. Never validate it against a provider.
     const account = await invoke('window.electronAPI.accounts.add({providerId:"deepseek", name:"isolated-scheduling-fixture", credentials:{token:"fixture-not-a-real-token"}})')
@@ -429,7 +427,7 @@ function runChild() {
     check('proxy-stop-via-ipc')
     check('stopped-ipc-status-shows-new-configured-port')
     await verifyAccountLiveness()
-    await require('./smoke-zai-account-browser.cjs')({ invoke, check, app, BrowserWindow, port, request })
+    await require('./smoke-zai-account-browser.cjs')({ invoke, check, app, BrowserWindow, port, request, allowFixtureOrigin })
     assert.ok(inside(os.homedir(), fixture) && inside(app.getPath('userData'), fixture))
     check('profile-boundary-retained')
   }

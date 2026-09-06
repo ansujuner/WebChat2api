@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import type { Provider, CredentialField, Account, BuiltinProviderConfig, ProviderVendor } from '@/types/electron'
 import { accountEmail, accountUserId, validatedAccountIdentity } from '../../../../shared/accountIdentity'
+import { supportsAccountLogin } from '../../../../shared/accountReauthentication'
 
 /**
  * Map OAuth credentials to provider credential field names
@@ -185,9 +186,9 @@ export function AddAccountDialog({
   const isEditing = !!editingAccount
   const builtinProvider = provider as BuiltinProviderConfig | null
   const credentialFields: CredentialField[] = builtinProvider?.credentialFields || getDefaultCredentialFields(provider?.authType, t)
-  const supportsOAuth = provider?.type === 'builtin' && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'arena'].includes(provider.id)
-  const canLogin = supportsOAuth && (!isEditing || provider?.id !== 'arena')
-  const isAccountReauthentication = canLogin && isEditing && provider?.id === 'zai'
+  const supportsOAuth = provider?.type === 'builtin' && supportsAccountLogin(provider.id)
+  const canLogin = supportsOAuth
+  const isAccountReauthentication = canLogin && isEditing
   const busy = isValidating || isSubmitting || isOAuthLoading
 
   const beginOperation = (kind: 'login' | 'validate' | 'save') => {
@@ -225,7 +226,7 @@ export function AddAccountDialog({
         setValidationResult({})
         setDailyLimit(editingAccount.dailyLimit?.toString() || '')
         setCredentials({ ...(editingAccount.credentials || {}) })
-        setActiveTab(provider?.id === 'arena' ? 'oauth' : 'manual')
+        setActiveTab(supportsOAuth ? 'oauth' : 'manual')
       } else {
         resetForm()
       }
@@ -365,12 +366,12 @@ export function AddAccountDialog({
     setIsOAuthLoading(true)
     setValidationResult({})
     setAccountLoginSaved(false)
-    setOAuthStatus(t('providers.accountLoginRestoring'))
+    setOAuthStatus(t(provider?.id === 'zai' ? 'providers.accountLoginRestoring' : 'providers.accountReloginRestoring'))
     try {
       const result = await window.electronAPI.accounts.reauthenticate(accountId)
       if (!canApplyResult(request)) return
       if (!result || result.accountId !== accountId || !result.success || !['restored', 'updated'].includes(result.state)) {
-        const allowedErrors = ['invalid_account', 'unsupported_provider', 'busy', 'cancelled', 'timeout', 'identity_mismatch', 'identity_unverified', 'login_required', 'network_error', 'browser_error', 'account_changed', 'save_failed']
+        const allowedErrors = ['invalid_account', 'unsupported_provider', 'busy', 'cancelled', 'timeout', 'identity_mismatch', 'identity_unverified', 'login_required', 'network_error', 'route_changed', 'browser_error', 'account_changed', 'save_failed']
         const code = result?.accountId === accountId && allowedErrors.includes(result.errorCode || '') ? result.errorCode : 'browser_error'
         setOAuthStatus(t(`providers.accountLoginErrors.${code}`))
         return
@@ -472,7 +473,7 @@ export function AddAccountDialog({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <User className="h-5 w-5" />
-              {isEditing ? t('providers.editAccount') : t('providers.addAccount')}
+              {isEditing ? t(provider.type === 'custom' ? 'providers.updateCredentials' : 'providers.editAccount') : t('providers.addAccount')}
             </DialogTitle>
             <DialogDescription>
               {provider.type === 'custom' ? t('customProvider.keyAccountHelp') : t('providers.manageAllAccounts')} - {provider.name}
@@ -530,10 +531,10 @@ export function AddAccountDialog({
                   <div className="flex flex-col items-center justify-center py-6 space-y-4">
                     <div className="text-center">
                       <p className="text-sm text-muted-foreground mb-4">
-                        {t(isAccountReauthentication ? 'providers.accountLoginHelp' : provider?.id === 'arena' ? 'arena.browserLoginHelp' : provider?.id === 'deepseek' ? 'deepseek.externalBrowserLoginHelp' : 'providers.clickToOpenOAuth')}
+                        {t(isAccountReauthentication ? provider.id === 'zai' ? 'providers.accountLoginHelp' : provider.id === 'arena' ? 'providers.arenaAccountReloginHelp' : 'providers.accountReloginHelp' : provider?.id === 'arena' ? 'arena.browserLoginHelp' : provider?.id === 'deepseek' ? 'deepseek.externalBrowserLoginHelp' : 'providers.clickToOpenOAuth')}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {t(isAccountReauthentication ? 'providers.accountLoginSessionHelp' : provider?.id === 'arena' ? 'arena.profileOnlyHelp' : isEditing ? 'providers.reloginHelp' : 'providers.oauthAutoCapture')}
+                        {t(isAccountReauthentication ? ['zai', 'arena'].includes(provider.id) ? 'providers.accountLoginSessionHelp' : 'providers.accountReloginSessionHelp' : provider?.id === 'arena' ? 'arena.profileOnlyHelp' : 'providers.oauthAutoCapture')}
                       </p>
                     </div>
                     <Button 
@@ -549,7 +550,7 @@ export function AddAccountDialog({
                       ) : (
                         <>
                           <ExternalLink className="mr-2 h-4 w-4" />
-                          {t(isAccountReauthentication ? 'providers.openAccountLogin' : provider?.id === 'arena' ? 'arena.browserLogin' : isEditing ? 'providers.relogin' : 'providers.openOAuthLogin')}
+                          {t(isAccountReauthentication ? provider.id === 'zai' ? 'providers.openAccountLogin' : 'providers.relogin' : provider?.id === 'arena' ? 'arena.browserLogin' : 'providers.openOAuthLogin')}
                         </>
                       )}
                     </Button>
@@ -566,7 +567,6 @@ export function AddAccountDialog({
               </Tabs>
             )}
 
-            {provider?.id === 'arena' && isEditing && <p className="text-sm text-muted-foreground">{t('arena.profileOnlyHelp')}</p>}
             {provider?.id !== 'arena' && !canLogin && (
               <CredentialFieldsForm
                 fields={credentialFields}

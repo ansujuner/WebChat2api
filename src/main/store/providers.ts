@@ -6,6 +6,7 @@
 import { storeManager } from './store'
 import { Provider, ProviderType, AuthType, BUILTIN_PROVIDERS } from './types'
 import { CustomProviderManager } from '../providers/custom'
+import { validateProviderNetworkSettings, type ProviderNetworkProxyMode } from '../../shared/providerNetwork'
 
 /**
  * Provider Manager Class
@@ -59,6 +60,8 @@ export class ProviderManager {
    * @returns Created provider
    */
   static create(data: {
+    networkProxyMode?: ProviderNetworkProxyMode
+    networkProxyUrl?: string
     name: string
     authType: AuthType
     apiEndpoint: string
@@ -92,11 +95,13 @@ export class ProviderManager {
     id: string,
     updates: Partial<Omit<Provider, 'id' | 'type' | 'createdAt'>>
   ): Provider | null {
+    if (!updates || typeof updates !== 'object' || Array.isArray(updates)) throw new Error('Invalid provider update')
     const existing = storeManager.getProviderById(id)
     
     if (!existing) {
       throw new Error(`Provider not found: ${id}`)
     }
+    validateProviderNetworkSettings({ ...existing, ...updates })
 
     if (existing.type === 'custom') return CustomProviderManager.update(id, updates)
     

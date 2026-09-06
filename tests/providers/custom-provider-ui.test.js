@@ -189,7 +189,7 @@ test('custom creation and CRUD/model controls are reachable; provider deletion r
 
 test('tool presentation distinguishes account blockers, actual tool failures and verified success without raw replies', () => {
   const { toolSmokePresentation: view } = load(prefix + 'lib/toolSmokePresentation.ts', {})
-  for (const upstreamCategory of ['captcha_required', 'authentication_required', 'account_cooling_down', 'account_busy', 'conversation_cursor_missing', 'rate_limited', 'upstream_error']) {
+  for (const upstreamCategory of ['captcha_required', 'authentication_required', 'account_cooling_down', 'account_busy', 'route_changed', 'conversation_cursor_missing', 'rate_limited', 'upstream_error']) {
     const result = view({ success: false, category: 'provider_or_account_error', upstreamCategory, retryAt: 123456, message: 'SECRET-REPLY', checks: [{ stage: 'tool_call', success: true }, { stage: 'tool_result', success: false }] })
     assert.equal(result.status, 'blocked'); assert.equal(result.messageKey, `toolCalling.smoke.reasons.${upstreamCategory}`)
     assert.equal(result.checks[0].success, true); assert.equal(result.retryAt, 123456)

@@ -80,15 +80,20 @@ function enqueueLocalCommand(argv: string[]): void {
     return
   }
   localCommands = localCommands.then(async () => {
-    const mode = argv.find(arg => /^--chat2api-probe=(catalog|live|stream|deepseek|login|tools|arena-login|arena|accounts|zai-login|zai-liveness|accounts-status)$/.test(arg))?.split('=')[1]
+    const mode = argv.find(arg => /^--chat2api-probe=(catalog|live|stream|deepseek|login|tools|arena-login|arena|accounts|zai-login|zai-liveness|accounts-status|network)$/.test(arg))?.split('=')[1]
     if (!mode) return
     const outputDirectory = app.isPackaged ? join(app.getPath('userData'), 'diagnostics') : join(app.getAppPath(), 'artifacts')
     const reportPath = join(outputDirectory, `proxy-${mode}-probe.json`)
-    const options = { live: !['catalog', 'login', 'arena-login', 'zai-login', 'accounts-status'].includes(mode), stream: mode === 'stream', protocol: mode === 'stream' ? 'anthropic' as const : 'openai' as const }
+    const options = { live: !['catalog', 'login', 'arena-login', 'zai-login', 'accounts-status', 'network'].includes(mode), stream: mode === 'stream', protocol: mode === 'stream' ? 'anthropic' as const : 'openai' as const }
     try {
       // Check report writability before any real generation.
       await mkdir(outputDirectory, { recursive: true })
       await writeFile(reportPath, JSON.stringify({ status: 'running', checkedAt: new Date().toISOString() }), 'utf8')
+      if (mode === 'network') {
+        const { runProviderNetworkProbe } = await import('./diagnostics/providerNetworkProbe')
+        await writeFile(reportPath, JSON.stringify({ ...options, ...await runProviderNetworkProbe(), checkedAt: new Date().toISOString() }, null, 2), 'utf8')
+        return
+      }
       if (mode === 'login' || mode === 'arena-login' || mode === 'zai-login') {
         const save = (report: unknown) => writeFile(reportPath, JSON.stringify({ ...(report as object), checkedAt: new Date().toISOString() }, null, 2), 'utf8')
         await save(await (mode === 'login' ? runDeepSeekLoginProbe(save) : mode === 'zai-login' ? runZaiAccountLoginProbe(save) : runArenaLoginProbe(save)))

@@ -70,6 +70,7 @@ const completeReply = (result: ForwardResult): boolean => {
     choice.message.content.trim().length > 0 && Buffer.byteLength(choice.message.content, 'utf8') <= 65536
 }
 function failureReason(result: ForwardResult): AccountLivenessReason {
+  if (result.errorCode === 'route_changed') return 'route_changed'
   if (result.errorCode === 'account_busy') return 'account_busy'
   if (result.errorCode === 'account_banned') return 'account_banned'
   if (result.errorCode === 'account_temporarily_suspended' || result.errorCode === 'account_cooldown') return 'cooldown'

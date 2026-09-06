@@ -62,6 +62,7 @@ function parseObject(text: string): Record<string, any> | undefined {
 }
 
 const UPSTREAM_MESSAGES: Record<string, string> = {
+  route_changed: 'Arena 网络设置已更改。请等待官网手动聊天结束，再关闭该 Arena 浏览器窗口后重试；本次未通过旧路由发送新请求。',
   captcha_required: '聊天请求被验证码拦截；请查看该账号实际聊天/验证窗口，有官网验证提示时手动处理。可能尚无可见窗口或提示；网页已登录不代表聊天验证通过。',
   verification_required: '聊天请求需要浏览器验证；请查看该账号实际聊天/验证窗口，有官网验证提示时手动处理。可能尚无可见窗口或提示；网页已登录不代表聊天验证通过。',
   action_required: '聊天请求需要额外检查；请查看该账号实际聊天/验证窗口的官网提示。可能尚无可见窗口或提示；网页已登录不代表聊天验证通过。',

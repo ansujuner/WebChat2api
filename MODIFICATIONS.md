@@ -7,6 +7,15 @@ The original copyright and **GPL-3.0-or-later** grant are retained in
 
 ## Changes from the supplied project
 
+- v1.6.5 (2026-09-06): added direct account-bound re-login for all built-in
+  providers, including reuse of Arena's original browser profile, identity
+  checks and atomic updates that preserve account controls. Added per-provider
+  inherited/system/direct/custom proxy routing across login, validation, model
+  discovery, chat and cleanup. Proxy decisions are scoped to each operation,
+  not guessed from hostnames; fixed proxy endpoints are strictly validated.
+  Added read-only route diagnostics and isolated concurrent-proxy/UI fixtures.
+  System proxy resolution does not certify connectivity or website access.
+
 - v1.6.4 (2026-09-06): routed Z.ai account liveness and API chat through the
   account's normal website submission flow instead of an independent request
   with fabricated browser metadata. Added isolated API pages, bounded response

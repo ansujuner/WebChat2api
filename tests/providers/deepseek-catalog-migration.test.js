@@ -28,6 +28,7 @@ function load(file, mocks) {
   vm.runInNewContext(source, { module, exports: module.exports, Date,
     console: { log() {}, error() {}, warn() {} },
     require(name) {
+      if (name === '../../shared/providerNetwork') return require('../../src/shared/providerNetwork.ts')
       if (name.endsWith('/shared/accountAvailability')) return require('../../src/shared/accountAvailability.ts')
       if (name === 'node:timers') return require('node:timers')
       if (name === '../arena/rateLimit') return { getArenaModelAvailability: () => ({ available: true, reason: 'ready' }) }

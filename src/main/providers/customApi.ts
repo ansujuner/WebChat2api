@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { Provider } from '../../shared/types'
+import { withProviderNetwork } from '../network/providerContext.ts'
 
 /** Custom providers are OpenAI-compatible HTTP APIs, not website login adapters. */
 export function normalizeCustomApiEndpoint(value: unknown): string {
@@ -60,7 +61,8 @@ export function parseCustomModels(data: unknown): CustomModelCatalog {
 export class CustomApiError extends Error {}
 
 /** Deliberately omit response bodies / Axios config: upstream errors may echo an API key. */
-export async function fetchCustomModels(provider: Pick<Provider, 'apiEndpoint' | 'headers' | 'credentialFields'>, credentials: Record<string, string> = {}): Promise<CustomModelCatalog> {
+export async function fetchCustomModels(provider: Pick<Provider, 'id' | 'apiEndpoint' | 'headers' | 'credentialFields'>, credentials: Record<string, string> = {}): Promise<CustomModelCatalog> {
+  return withProviderNetwork(provider.id, async () => {
   let url: string
   let headers: Record<string, string>
   try { url = customApiUrl(provider, '/models'); headers = customRequestHeaders(provider, credentials) }
@@ -78,4 +80,5 @@ export async function fetchCustomModels(provider: Pick<Provider, 'apiEndpoint' |
     if (axios.isAxiosError(error) && ['ECONNABORTED', 'ETIMEDOUT'].includes(error.code || '')) throw new CustomApiError('Model lookup timed out; check the Base URL and network proxy')
     throw new CustomApiError('Unable to connect to the model endpoint; check the Base URL, certificate, and network proxy')
   }
+  })
 }

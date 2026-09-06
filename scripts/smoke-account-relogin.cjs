@@ -1,10 +1,13 @@
 /** Existing-account UI/IPC regression. The parent supplies an isolated profile.
- * Only the OAuth IPC response is synthetic: no website or login window is opened.
+ * Only the account reauthentication boundary is synthetic: no website or login window is opened.
+ * This verifies UI save semantics, not provider identity. Main CAS/browser verification has separate tests.
  */
 const assert = require('node:assert/strict')
 
 module.exports = async function verifyAccountRelogin({ invoke, check, ipcMain }) {
-  const channel = 'oauth:startInAppLogin'
+  const channel = 'accounts:reauthenticate'
+  const originalHandler = ipcMain._invokeHandlers.get(channel)
+  assert.equal(typeof originalHandler, 'function', 'The production account reauthentication handler must exist')
   const name = 'Isolated existing Kimi account'
   const oldToken = 'isolated-relogin-old-token'
   const newToken = 'isolated-relogin-new-token'
@@ -27,9 +30,7 @@ module.exports = async function verifyAccountRelogin({ invoke, check, ipcMain })
   }
   const edit = async () => {
     await until(`!!document.querySelector('span[title=${JSON.stringify(name)}]')`, 'existing account card')
-    assert.equal(await invoke(`(() => { const card=document.querySelector('span[title=${JSON.stringify(name)}]').closest('.glass-card'); const trigger=card?.querySelector('button[aria-haspopup="menu"]'); if(!trigger)return false; trigger.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,ctrlKey:false,pointerType:'mouse'})); return true })()`), true)
-    await until(`!!document.querySelector('[role="menuitem"]')`, 'account menu')
-    await clickText(['编辑账户', 'Edit Account'], '[role="menuitem"]')
+    assert.equal(await invoke(`(() => { const card=document.querySelector('span[title=${JSON.stringify(name)}]').closest('.glass-card'); const trigger=card?.querySelector('[data-testid="account-relogin-entry"]'); if(!trigger||trigger.disabled)return false; trigger.click(); return true })()`), true, 'The account card must expose a direct sign-in entry')
     await until(`!!document.querySelector('[role="dialog"] #name')`, 'edit dialog')
     assert.equal(await invoke(`document.getElementById('name').value`), name)
     await clickText(['OAuth 登录', 'OAuth Login'], '[role="tab"]')
@@ -39,14 +40,19 @@ module.exports = async function verifyAccountRelogin({ invoke, check, ipcMain })
     await clickText(['取消', 'Cancel'])
     await until(`!document.querySelector('[role="dialog"]')`, 'closed edit dialog')
   }
-  // Replace only the login boundary in this short-lived test process. Real
-  // production renderer, preload, account update and encrypted store are retained.
+  // Synthetic UI boundary only. Real renderer, preload, account update and encrypted
+  // store are retained. Restore the real handler before the website-backed Z.ai fixture.
   ipcMain.removeHandler(channel)
   ipcMain.handle(channel, async (_event, input) => {
-    assert.equal(input.providerId, 'kimi')
-    assert.equal(input.providerType, 'kimi')
+    assert.equal(input, accountId)
+    const before = await call('getById', input, true)
     loginCount += 1
-    return new Promise(resolve => { finishLogin = resolve })
+    const result = await new Promise(resolve => { finishLogin = resolve })
+    const current = await call('getById', input, true)
+    if (!current || current.credentialRevision !== before.credentialRevision) return { success: false, accountId: input, state: 'failed', errorCode: 'account_changed' }
+    if (!result.success) return { success: false, accountId: input, state: 'failed', errorCode: 'cancelled' }
+    await call('update', input, { credentials: result.credentials, status: 'active' })
+    return { success: true, accountId: input, state: 'updated' }
   })
   try {
     const account = await call('add', { providerId: 'kimi', name, nameSource: 'custom', email: identity.email,
@@ -57,15 +63,15 @@ module.exports = async function verifyAccountRelogin({ invoke, check, ipcMain })
     await until(`!!document.querySelector('img[alt="Kimi"]')`, 'Kimi provider card')
     assert.equal(await invoke(`(() => { const card=document.querySelector('img[alt="Kimi"]').closest('.glass-card'); const node=Array.from(card.querySelectorAll('button')).find(node=>['账户管理','Accounts'].includes(node.textContent.trim())); if(!node)return false; node.click(); return true })()`), true)
     await edit()
-    check('existing-kimi-account-menu-edit-exposes-oauth-relogin-in-real-renderer')
+    check('existing-kimi-account-direct-entry-exposes-oauth-relogin-in-real-renderer')
     await clickText(['重新登录', 'Sign in again'])
     await until(`Array.from(document.querySelectorAll('[role="dialog"] button')).some(node=>['保存更改','Save Changes'].includes(node.textContent.trim())&&node.disabled)`, 'save disabled while signing in')
     await until(() => loginCount === 1, 'login request reached IPC')
     assert.equal(typeof finishLogin, 'function')
     finishLogin({ success: true, providerId: 'kimi', credentials: { token: newToken }, accountInfo: identity })
     await until(`Array.from(document.querySelectorAll('[role="dialog"] button')).some(node=>['保存更改','Save Changes'].includes(node.textContent.trim())&&!node.disabled)`, 'ready to explicitly save')
-    assert.equal((await call('getById', accountId, true)).credentials.token, oldToken, 'Login must not write the account before Save Changes')
-    check('relogin-real-preload-reaches-isolated-oauth-boundary-and-requires-explicit-save')
+    assert.equal((await call('getById', accountId, true)).credentials.token, newToken, 'The saved reauthentication result must be reflected without a second credential save')
+    check('relogin-synthetic-account-boundary-refreshes-auto-saved-credentials-without-second-save')
     await clickText(['保存更改', 'Save Changes'])
     await until(`!document.querySelector('[role="dialog"]')`, 'saved existing account')
     const updated = await call('getById', accountId, true)
@@ -74,7 +80,7 @@ module.exports = async function verifyAccountRelogin({ invoke, check, ipcMain })
     assert.equal(updated.name, name)
     assert.equal(updated.nameSource, 'custom')
     assert.equal(updated.enabled, false)
-    assert.equal(updated.status, 'expired', 'Synthetic login is not proof that authentication errors or website restrictions were cleared')
+    assert.equal(updated.status, 'active', 'The synthetic boundary reports a saved status; this fixture is not real provider verification')
     assert.equal(updated.cooldownUntil, cooldownUntil)
     assert.equal(updated.cooldownReason, 'temporary_ban')
     assert.equal(updated.dailyLimit, 17)
@@ -86,17 +92,19 @@ module.exports = async function verifyAccountRelogin({ invoke, check, ipcMain })
     await until(`Array.from(document.querySelectorAll('[role="dialog"] button')).some(node=>['保存更改','Save Changes'].includes(node.textContent.trim())&&node.disabled)`, 'second login pending')
     await until(() => loginCount === 2, 'second login reached IPC')
     await cancel()
+    await call('update', accountId, { credentials: { token: 'isolated-newer-manual-token' } })
     finishLogin({ success: true, providerId: 'kimi', credentials: { token: 'isolated-stale-login-token' }, accountInfo: identity })
     await edit()
     await clickText(['手动输入', 'Manual Input'], '[role="tab"]')
     await until(`!!document.getElementById('token')`, 'original credentials after reopen')
-    assert.equal(await invoke(`document.getElementById('token').value`), newToken)
+    assert.equal(await invoke(`document.getElementById('token').value`), 'isolated-newer-manual-token')
     await cancel()
-    assert.equal((await call('getById', accountId, true)).credentials.token, newToken)
-    check('cancelled-relogin-cannot-overwrite-reopened-account-or-persist-late-credentials')
+    assert.equal((await call('getById', accountId, true)).credentials.token, 'isolated-newer-manual-token')
+    check('synthetic-late-relogin-cannot-overwrite-concurrent-replacement-or-reopened-editor')
   } finally {
     finishLogin?.({ success: false, providerId: 'kimi', error: 'Login window was closed' })
     ipcMain.removeHandler(channel)
+    ipcMain.handle(channel, originalHandler)
     if (accountId) await call('delete', accountId)
   }
   await invoke("window.location.hash = '#/'; void 0")

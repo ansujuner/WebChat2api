@@ -12,7 +12,10 @@ function load(file, mocks = {}, globals = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   }).outputText, { module, exports: module.exports, Date,
     console: { log() {}, error() {} },
-    require(name) { assert.ok(Object.hasOwn(mocks, name), `Unexpected dependency ${name}`); return mocks[name] },
+    require(name) {
+      if (name === '../../shared/providerNetwork') return require('../../src/shared/providerNetwork.ts')
+      assert.ok(Object.hasOwn(mocks, name), `Unexpected dependency ${name}`); return mocks[name]
+    },
     ...globals,
   }, { filename: file })
   return module.exports

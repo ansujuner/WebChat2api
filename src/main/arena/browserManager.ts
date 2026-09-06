@@ -8,16 +8,22 @@ import { Readable, type Writable } from 'node:stream'
 import { findInstalledLoginBrowser, loginBrowserArguments, browserChildEnvironment } from '../oauth/browserDiscovery'
 import { CdpPipe } from '../oauth/cdpPipe'
 import { storeManager } from '../store/store'
+import { getProviderProxyConfig } from '../network/proxy'
+import type { ProviderProxyConfig } from '../../shared/providerNetwork'
+import { accountEmail } from '../../shared/accountIdentity'
+import type { AccountReauthenticationErrorCode } from '../../shared/accountReauthentication'
 import { ARENA_PUBLIC_MODELS, ArenaError, ArenaProtocolDecoder, arenaRequest, isArenaPage, isArenaUuid, normalizeArenaModels, type ArenaConversation, type ArenaModel, type ArenaModality } from './protocol'
 import { ARENA_RUNTIME_SNAPSHOT, arenaStartExpression, arenaDrainExpression, arenaAbortExpression } from './pageScripts'
 import { getArenaRateLimiter, isArenaQuotaAccountId } from './rateLimit'
 
 export interface ArenaAccountInfo { email?: string; name?: string }
 export interface ArenaLoginResult { success: boolean; profileId?: string; accountInfo?: ArenaAccountInfo; error?: string }
-export interface ArenaStatus { authenticated: boolean; accountInfo?: ArenaAccountInfo; actionRequired?: boolean }
+export interface ArenaReauthenticationOptions { profileId: string; expectedEmail?: string; isAccountCurrent: () => boolean }
+export interface ArenaReauthenticationResult extends ArenaLoginResult { errorCode?: AccountReauthenticationErrorCode }
+export interface ArenaStatus { authenticated: boolean; accountInfo?: ArenaAccountInfo; actionRequired?: boolean; errorCode?: 'route_changed' }
 export interface ArenaChatOptions { accountId: string; profileId: string; model: string; prompt: string; conversation?: ArenaConversation; signal?: AbortSignal }
 export interface ArenaCatalog { models: ArenaModel[]; source: 'runtime' | 'public-snapshot' }
-interface BrowserContext { profileId: string; pipe: CdpPipe; child: ChildProcess; exited: () => boolean; exit: Promise<void>; proxyMode: 'system' | 'none' }
+interface BrowserContext { profileId: string; pipe: CdpPipe; child: ChildProcess; exited: () => boolean; exit: Promise<void>; proxyConfig: ProviderProxyConfig }
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(new ArenaError('aborted'))
@@ -57,7 +63,7 @@ export class ArenaBrowserManager extends EventEmitter {
   private browsers = new Map<string, Promise<BrowserContext>>()
   private closingProfiles = new Map<string, Promise<void>>()
   private busyProfiles = new Set<string>()
-  private login: { controller: AbortController; completion: Promise<ArenaLoginResult> } | null = null
+  private login: { controller: AbortController; completion: Promise<ArenaLoginResult>; profileId?: string } | null = null
   private destroyed = false
 
   isWindowOpen(): boolean { return this.login !== null }
@@ -69,6 +75,65 @@ export class ArenaBrowserManager extends EventEmitter {
     const completion = this.loginFlow(controller)
     this.login = { controller, completion }
     try { return await completion } finally { if (this.login?.controller === controller) this.login = null }
+  }
+  /** Existing accounts keep their exact app-owned profile. No new profile or copied cookies. */
+  async reauthenticate(options: ArenaReauthenticationOptions): Promise<ArenaReauthenticationResult> {
+    if (this.destroyed) return { success: false, errorCode: 'browser_error' }
+    if (!isArenaUuid(options.profileId)) return { success: false, errorCode: 'invalid_account' }
+    if (this.login || this.busyProfiles.has(options.profileId)) return { success: false, errorCode: 'busy' }
+    const controller = new AbortController()
+    this.busyProfiles = new Set([...this.busyProfiles, options.profileId])
+    const completion = this.reauthenticateFlow(options, controller)
+    this.login = { controller, completion, profileId: options.profileId }
+    try { return await completion }
+    finally {
+      if (this.login?.controller === controller) this.login = null
+      this.busyProfiles = new Set([...this.busyProfiles].filter(id => id !== options.profileId))
+    }
+  }
+  private async reauthenticateFlow(options: ArenaReauthenticationOptions, controller: AbortController): Promise<ArenaReauthenticationResult> {
+    let timedOut = false, shown = false
+    const isCurrent = () => { try { return options.isAccountCurrent() } catch { return false } }
+    const timeout = setTimeout(() => { timedOut = true; controller.abort() }, 5 * 60 * 1000)
+    try {
+      if (!isCurrent()) return { success: false, errorCode: 'account_changed' }
+      await arenaProfileDirectory(options.profileId) // Verify ownership marker; never create a replacement.
+      const browser = await this.context(options.profileId, controller.signal, true)
+      let expectedEmail = accountEmail(options.expectedEmail)
+      while (!controller.signal.aborted) {
+        if (!isCurrent()) return { success: false, errorCode: 'account_changed' }
+        if (browser.exited()) return { success: false, errorCode: 'cancelled' }
+        const page = await this.readyPage(browser, controller.signal)
+        let snapshot: any
+        try {
+          snapshot = page.snapshot
+          if (!shown) { await browser.pipe.send('Page.bringToFront', {}, page.sessionId); shown = true }
+        } finally { await browser.pipe.send('Target.detachFromTarget', { sessionId: page.sessionId }).catch(() => undefined) }
+        if (!isCurrent()) return { success: false, errorCode: 'account_changed' }
+        if (controller.signal.aborted) return { success: false, errorCode: timedOut ? 'timeout' : 'cancelled' }
+        const email = accountEmail(snapshot?.accountInfo?.email)
+        if (snapshot?.authenticated === true && email) {
+          if (expectedEmail && email.toLowerCase() !== expectedEmail.toLowerCase()) return { success: false, errorCode: 'identity_mismatch' }
+          // The original owned, already-authenticated profile can establish a legacy email.
+          if (!expectedEmail) expectedEmail = email
+          return { success: true, profileId: options.profileId, accountInfo: { email } }
+        }
+        // A logged-out legacy profile has no reliable identity to compare after a new sign-in.
+        if (!expectedEmail) return { success: false, errorCode: 'identity_unverified' }
+        await delay(1000, controller.signal)
+      }
+      return { success: false, errorCode: timedOut ? 'timeout' : 'cancelled' }
+    } catch (error) {
+      return { success: false, errorCode: !isCurrent() ? 'account_changed' : controller.signal.aborted ? timedOut ? 'timeout' : 'cancelled'
+        : error instanceof ArenaError && error.code === 'route_changed' ? 'route_changed' : 'browser_error' }
+    } finally { clearTimeout(timeout) }
+  }
+  /** Account deletion cancels only that profile's login and closes only its owned browser. */
+  async clearProfile(profileId: string): Promise<void> {
+    if (!isArenaUuid(profileId)) return
+    const login = this.login
+    if (login?.profileId === profileId) { login.controller.abort(); await login.completion }
+    await this.closeProfile(profileId)
   }
   private async loginFlow(controller: AbortController): Promise<ArenaLoginResult> {
     const profileId = randomUUID()
@@ -109,27 +174,32 @@ export class ArenaBrowserManager extends EventEmitter {
     await this.closingProfiles.get(profileId)
     if (this.destroyed) throw new ArenaError('browser_unavailable')
     if (signal?.aborted) throw new ArenaError('aborted')
-    const proxyMode = storeManager.getConfig().oauthProxyMode || 'system'
+    const proxyConfig = getProviderProxyConfig('arena')
     const existing = this.browsers.get(profileId)
     if (existing) {
       const context = await existing
-      if (!context.exited() && context.proxyMode === proxyMode) return context
+      if (!context.exited()) {
+        if (JSON.stringify(context.proxyConfig) === JSON.stringify(proxyConfig)) return context
+        // An idle API lease cannot prove a visible website's manual generation has finished.
+        // Never close it or submit on the old route; the user must close this window first.
+        throw new ArenaError('route_changed', { stage: 'browser' })
+      }
       if (this.busyProfiles.has(profileId) && !requestOwner) throw new ArenaError('account_busy')
       await this.closeProfile(profileId)
       return this.context(profileId, signal, requestOwner)
     }
-    const launch = this.launch(profileId, proxyMode, signal)
+    const launch = this.launch(profileId, proxyConfig, signal)
     this.browsers = new Map([...this.browsers, [profileId, launch]])
     try { return await launch } catch {
       this.browsers = new Map([...this.browsers].filter(([id, value]) => id !== profileId || value !== launch))
       throw new ArenaError(signal?.aborted ? 'aborted' : 'browser_unavailable')
     }
   }
-  private async launch(profileId: string, proxyMode: 'system' | 'none', signal?: AbortSignal): Promise<BrowserContext> {
+  private async launch(profileId: string, proxyConfig: ProviderProxyConfig, signal?: AbortSignal): Promise<BrowserContext> {
     const directory = await arenaProfileDirectory(profileId)
     const browser = await findInstalledLoginBrowser(signal)
     if (signal?.aborted) throw new ArenaError('aborted')
-    const args = [...loginBrowserArguments(directory, proxyMode).slice(0, -1), 'https://arena.ai/text/direct']
+    const args = [...loginBrowserArguments(directory, proxyConfig).slice(0, -1), 'https://arena.ai/text/direct']
     const child = spawn(browser.executable, args, { shell: false, windowsHide: false, detached: false,
       stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], env: browserChildEnvironment() })
     let exited = false
@@ -146,7 +216,7 @@ export class ArenaBrowserManager extends EventEmitter {
       pipe.close()
       throw new ArenaError('browser_unavailable')
     }
-    return { profileId, pipe, child, exit, exited: () => exited, proxyMode }
+    return { profileId, pipe, child, exit, exited: () => exited, proxyConfig }
   }
   private async closeProfile(profileId: string): Promise<void> {
     const closing = this.closingProfiles.get(profileId)
@@ -227,7 +297,8 @@ export class ArenaBrowserManager extends EventEmitter {
         return { authenticated: true, accountInfo: { email, ...(typeof snapshot.accountInfo.name === 'string' && snapshot.accountInfo.name.length <= 160 ? { name: snapshot.accountInfo.name } : {}) } }
       }
       return { authenticated: false, actionRequired: true }
-    } catch { return { authenticated: false, actionRequired: true } }
+    } catch (error) { return { authenticated: false, actionRequired: true,
+      ...(error instanceof ArenaError && error.code === 'route_changed' ? { errorCode: 'route_changed' as const } : {}) } }
   }
   async getModels(profileId?: string, signal?: AbortSignal): Promise<ArenaCatalog> {
     if (profileId) {
@@ -294,6 +365,11 @@ export class ArenaBrowserManager extends EventEmitter {
       const snapshot = page.snapshot
       if (options.signal?.aborted) throw new ArenaError('aborted')
       if (snapshot?.authenticated !== true) throw new ArenaError('action_required')
+      const account = storeManager.getAccountById(options.accountId, true)
+      const expectedEmail = accountEmail(account?.email)
+      const runtimeEmail = accountEmail(snapshot?.accountInfo?.email)
+      if (!account || account.providerId !== 'arena' || account.credentials.browserProfileId !== options.profileId
+        || !runtimeEmail || (expectedEmail && expectedEmail.toLowerCase() !== runtimeEmail.toLowerCase())) throw new ArenaError('action_required')
       const model = normalizeArenaModels(snapshot.models).find(model => model.modality === modality && (model.id === options.model || model.name.toLowerCase() === options.model.toLowerCase()))
       if (!model) throw new ArenaError('model_not_available')
       const request = arenaRequest(model, options.prompt, options.conversation)

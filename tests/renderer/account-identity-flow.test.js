@@ -42,6 +42,7 @@ async function setupDialog({ customName, email = 'login@example.test' } = {}) {
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'Fragment' }
       if (name === 'react-i18next') return { useTranslation: () => ({ t: key => key }) }
       if (name.endsWith('shared/accountIdentity')) return identity
+      if (name.endsWith('shared/accountReauthentication')) return require('../../src/shared/accountReauthentication.ts')
       return new Proxy({}, { get: (_, key) => key })
     },
   }, { filename: componentFile })

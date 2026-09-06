@@ -2,9 +2,12 @@ import { storeManager } from '../store/store'
 import type { Provider, AuthType } from '../../shared/types'
 import { BUILTIN_PROVIDERS, type CredentialField } from '../store/types'
 import { accountAvailability } from '../../shared/accountAvailability'
+import { validateProviderNetworkSettings, normalizeProviderProxyUrl, type ProviderNetworkProxyMode } from '../../shared/providerNetwork'
 import { fetchCustomModels, normalizeCustomApiEndpoint, validateCustomHeaders, type CustomModelCatalog } from './customApi'
 
 export interface CustomProviderData {
+  networkProxyMode?: ProviderNetworkProxyMode
+  networkProxyUrl?: string
   id?: string
   name: string
   type?: 'builtin' | 'custom'
@@ -48,6 +51,7 @@ function normalizeFields(value: unknown, authType: AuthType): CredentialField[] 
 export class CustomProviderManager {
   private static normalize(data: CustomProviderData, existingId?: string): Omit<Provider, 'id' | 'createdAt' | 'updatedAt' | 'enabled'> {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid provider configuration')
+    validateProviderNetworkSettings(data)
     const name = text(data.name, 'provider name (1-50 characters)', 50, false)
     if (storeManager.getProviders().some(provider => provider.id !== existingId && provider.name.trim().toLowerCase() === name.toLowerCase())) throw new Error('Provider name already exists')
     if (!['oauth', 'token', 'cookie', 'userToken', 'refresh_token', 'jwt', 'realUserID_token', 'tongyi_sso_ticket'].includes(data.authType)) throw new Error('Invalid authentication type')
@@ -62,6 +66,8 @@ export class CustomProviderManager {
       modelMappings = Object.fromEntries(supportedModels.map(name => [name, Object.hasOwn(supplied, name) ? supplied[name] : name]))
     }
     return { name, type: 'custom', authType: data.authType, apiEndpoint: normalizeCustomApiEndpoint(data.apiEndpoint), chatPath: '/chat/completions',
+      ...(data.networkProxyMode !== undefined ? { networkProxyMode: data.networkProxyMode } : {}),
+      ...(data.networkProxyUrl !== undefined ? { networkProxyUrl: normalizeProviderProxyUrl(data.networkProxyUrl) } : {}),
       headers: validateCustomHeaders(data.headers), supportedModels, modelMappings, credentialFields: normalizeFields(data.credentialFields, data.authType),
       ...(data.description !== undefined ? { description: text(data.description, 'description', 1000, true, true) } : {}),
       ...(data.icon !== undefined ? { icon: text(data.icon, 'icon', 2048) } : {}) }
@@ -74,6 +80,7 @@ export class CustomProviderManager {
 
   static create(data: CustomProviderData): Provider {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid provider configuration')
+    validateProviderNetworkSettings(data)
     // Re-adding a known website provider always uses the trusted bundled configuration.
     if (data.type === 'builtin') {
       const builtin = BUILTIN_PROVIDERS.find(provider => provider.id === data.id)
@@ -81,7 +88,8 @@ export class CustomProviderManager {
       const existing = storeManager.getProviderById(builtin.id)
       if (existing) return existing
       const now = Date.now()
-      const provider: Provider = { ...builtin, createdAt: now, updatedAt: now }
+      const provider: Provider = { ...builtin, ...(data.networkProxyMode !== undefined ? { networkProxyMode: data.networkProxyMode } : {}),
+        ...(data.networkProxyUrl !== undefined ? { networkProxyUrl: normalizeProviderProxyUrl(data.networkProxyUrl) } : {}), createdAt: now, updatedAt: now }
       storeManager.addProvider(provider)
       return provider
     }
@@ -155,6 +163,8 @@ export class CustomProviderManager {
     const existing = storeManager.getProviderById(id)
     if (!existing) throw new Error('Provider not found')
     return this.create({ name: newName || `${existing.name} (Copy)`, authType: existing.authType, apiEndpoint: existing.apiEndpoint,
+      networkProxyMode: existing.networkProxyMode,
+      networkProxyUrl: existing.networkProxyUrl,
       headers: existing.headers, description: existing.description, icon: existing.icon,
       supportedModels: existing.supportedModels, modelMappings: existing.modelMappings, credentialFields: existing.credentialFields })
   }
@@ -165,6 +175,8 @@ export class CustomProviderManager {
     // Old imports may contain plaintext authentication headers. Never export those secrets.
     const headers = Object.fromEntries(Object.entries(provider.headers).filter(([name]) => !/(?:authorization|cookie|api[-_]?key|token|secret|password)/i.test(name)))
     return JSON.stringify({ name: provider.name, authType: provider.authType, apiEndpoint: provider.apiEndpoint,
+      networkProxyMode: provider.networkProxyMode,
+      networkProxyUrl: provider.networkProxyUrl,
       headers, description: provider.description, supportedModels: provider.supportedModels,
       modelMappings: provider.modelMappings, credentialFields: provider.credentialFields }, null, 2)
   }

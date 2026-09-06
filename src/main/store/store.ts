@@ -45,6 +45,7 @@ import type { AppLogFilter } from '../appLogs/types'
 import { normalizeAccountIdentity, accountEmail, accountUserId } from '../../shared/accountIdentity'
 import { savedArenaCatalog } from '../providers/arenaCatalog'
 import { accountAvailability, validateAccountAvailabilityUpdate } from '../../shared/accountAvailability'
+import { validateProviderNetworkSettings, normalizeProviderProxyUrl } from '../../shared/providerNetwork'
 import { setTimeout, clearTimeout } from 'node:timers'
 
 // Dynamically import electron-store (ESM module)
@@ -511,9 +512,10 @@ export class StoreManager {
    */
   addProvider(provider: Provider): void {
     this.ensureInitialized()
+    validateProviderNetworkSettings(provider)
     const providers = this.store!.get('providers') as Provider[] || []
-    providers.push(provider)
-    this.store!.set('providers', providers)
+    this.store!.set('providers', [...providers, { ...provider,
+      ...(provider.networkProxyUrl !== undefined ? { networkProxyUrl: normalizeProviderProxyUrl(provider.networkProxyUrl) } : {}) }])
   }
 
   /**
@@ -521,21 +523,24 @@ export class StoreManager {
    */
   updateProvider(id: string, updates: Partial<Provider>): Provider | null {
     this.ensureInitialized()
+    if (!updates || typeof updates !== 'object' || Array.isArray(updates)) throw new Error('Invalid provider update')
     const providers = this.store!.get('providers') as Provider[] || []
     const index = providers.findIndex((p: Provider) => p.id === id)
     
     if (index === -1) {
       return null
     }
+    validateProviderNetworkSettings({ ...providers[index], ...updates })
     
-    providers[index] = {
+    const updated = {
       ...providers[index],
       ...updates,
+      ...(updates.networkProxyUrl !== undefined ? { networkProxyUrl: normalizeProviderProxyUrl(updates.networkProxyUrl) } : {}),
       updatedAt: Date.now(),
     }
     
-    this.store!.set('providers', providers)
-    return providers[index]
+    this.store!.set('providers', providers.map((provider, position) => position === index ? updated : provider))
+    return updated
   }
 
   /**
@@ -782,11 +787,11 @@ export class StoreManager {
     const accounts = (this.store!.get('accounts') || []) as Account[]
     const current = accounts.find(account => account.id === id)
     const provider = this.getProviderById(expected.providerId)
-    if (!current || current.providerId !== expected.providerId || expected.providerId !== 'zai' || provider?.type !== 'builtin'
+    if (!current || current.providerId !== expected.providerId || !BUILTIN_PROVIDERS.some(item => item.id === expected.providerId) || provider?.type !== 'builtin'
       || credentialRevision(current) !== expected.credentialRevision) return null
     const email = accountEmail(verified.accountInfo.email)
     const userId = accountUserId(verified.accountInfo.userId)
-    if (!email && !userId) throw new Error('Account identity was not verified')
+    if ((!email && !userId) || email?.toLowerCase().endsWith('@guest.com')) throw new Error('Account identity was not verified')
     const previousEmail = accountEmail(expected.email)
     const previousUserId = accountUserId(expected.providerUserId)
     if (accountEmail(current.email) !== previousEmail || accountUserId(current.providerUserId) !== previousUserId) return null
@@ -795,10 +800,25 @@ export class StoreManager {
     const same = (a: Record<string, string>, b: Record<string, string>) => Object.keys(a).length === Object.keys(b).length
       && Object.keys(a).every(key => Object.hasOwn(b, key) && a[key] === b[key])
     if (!same(decrypted, expected.credentials)) return null
-    // Z.ai's account-bound browser verifies this token. Old CAPTCHA proof and cookie snapshots are not reused.
-    const token = verified.credentials.token
-    if (typeof token !== 'string' || !token.trim() || token.length > 128 * 1024 || /\s/.test(token)) throw new Error('Invalid verified account credentials')
-    const credentials = { token }
+    let credentials: Record<string, string>
+    if (expected.providerId === 'zai') {
+      // Old CAPTCHA proof and cookie snapshots are never reused by the account-bound browser.
+      const token = verified.credentials.token
+      if (typeof token !== 'string' || !token.trim() || token.length > 128 * 1024 || /\s/.test(token)) throw new Error('Invalid verified account credentials')
+      credentials = { token }
+    } else if (expected.providerId === 'arena') {
+      const browserProfileId = verified.credentials.browserProfileId
+      if (typeof browserProfileId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(browserProfileId)
+        || browserProfileId !== expected.credentials.browserProfileId || Object.keys(verified.credentials).length !== 1) throw new Error('Invalid verified account profile')
+      credentials = { browserProfileId }
+    } else {
+      const fields = provider.credentialFields ?? BUILTIN_PROVIDERS.find(item => item.id === expected.providerId)?.credentialFields ?? []
+      if (!Object.keys(verified.credentials).length || Object.keys(verified.credentials).length > 32
+        || Object.entries(verified.credentials).some(([key, value]) => !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)
+          || !value.trim() || value.length > 128 * 1024 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value))
+        || fields.some(field => field.required && !verified.credentials[field.name]?.trim())) throw new Error('Invalid verified account credentials')
+      credentials = { ...verified.credentials }
+    }
     const nextIdentity = { ...(email ? { email } : {}), ...(userId ? { providerUserId: userId } : {}) }
     const changed = !same(decrypted, credentials) || (email !== undefined && current.email !== email)
       || (userId !== undefined && current.providerUserId !== userId) || current.status !== 'active' || !!current.errorMessage

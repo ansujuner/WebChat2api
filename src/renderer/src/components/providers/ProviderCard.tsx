@@ -1,4 +1,5 @@
 import { providerIcons } from '@/lib/providerIcons'
+import { ProviderNetworkSettings } from './ProviderNetworkSettings'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -235,6 +236,7 @@ export function ProviderCard({
           <Button size="sm" variant="outline" disabled={isUpdatingModels || accountCount === 0} onClick={() => onUpdateModels?.(provider.id)} title={accountCount === 0 ? t('customProvider.fetchHelp') : undefined}><Download className="mr-1.5 h-3.5 w-3.5" />{t('customProvider.fetchModels')}</Button>
           <Button size="sm" variant="ghost" className="text-destructive" onClick={() => onDelete(provider.id)}><Trash2 className="mr-1.5 h-3.5 w-3.5" />{t('common.delete')}</Button>
         </div>}
+        <ProviderNetworkSettings provider={provider} />
       </CardContent>
     </Card>
   )

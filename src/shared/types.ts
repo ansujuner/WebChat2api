@@ -1,4 +1,5 @@
 import type { LegacyToolPromptConfig, ToolCallingConfig } from './toolCalling'
+import type { ProviderNetworkProxyMode } from './providerNetwork'
 
 export type AccountStatus = 'active' | 'inactive' | 'expired' | 'error'
 
@@ -69,6 +70,9 @@ export interface Account {
 }
 
 export interface Provider {
+  /** Applies to this provider's login, validation, model discovery and chat traffic. */
+  networkProxyMode?: ProviderNetworkProxyMode
+  networkProxyUrl?: string
   id: string
   name: string
   type: ProviderType

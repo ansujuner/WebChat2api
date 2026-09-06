@@ -21,6 +21,7 @@ export const IpcChannels = {
   PROVIDERS_GET_BUILTIN: 'providers:getBuiltin',
   PROVIDERS_ADD: 'providers:add',
   PROVIDERS_UPDATE: 'providers:update',
+  PROVIDERS_GET_NETWORK_STATUS: 'providers:getNetworkStatus',
   PROVIDERS_DELETE: 'providers:delete',
   PROVIDERS_CHECK_STATUS: 'providers:checkStatus',
   PROVIDERS_CHECK_ALL_STATUS: 'providers:checkAllStatus',

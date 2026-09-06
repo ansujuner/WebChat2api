@@ -1,3 +1,4 @@
+import { getProviderProxyConfig, normalizeNetworkProxyConfig, type ProviderProxyConfig } from '../network/providerContext.ts'
 /** Isolated normal browser login: no spoofing, fingerprint injection, or security bypasses. */
 import { BrowserWindow, session, type Session, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
@@ -14,6 +15,7 @@ export interface InAppLoginOptions {
   providerType: ProviderType
   timeout?: number
   proxyMode?: 'system' | 'none'
+  proxyConfig?: ProviderProxyConfig
 }
 const DEFAULT_TIMEOUT = 300000
 const MIN_LOGIN_TIME = 5000
@@ -41,6 +43,9 @@ export class InAppLoginManager extends EventEmitter {
     if (options.timeout !== undefined && (!Number.isFinite(options.timeout) || options.timeout < 1000 || options.timeout > 30 * 60 * 1000)) {
       return { success: false, error: 'Login timeout must be between 1 second and 30 minutes.' }
     }
+    let proxyConfig: ProviderProxyConfig
+    try { proxyConfig = normalizeNetworkProxyConfig(options.proxyConfig ?? options.proxyMode ?? getProviderProxyConfig(options.providerId)) }
+    catch { return { success: false, error: 'Invalid login proxy configuration.' } }
     this.active = true
     this.generation += 1
     const generation = this.generation
@@ -49,7 +54,7 @@ export class InAppLoginManager extends EventEmitter {
     const result = new Promise<InAppLoginResult>(resolve => { this.resolvePromise = resolve })
     this.timeoutId = setTimeout(() => this.complete({ success: false, error: 'Login timeout. Please retry when ready to sign in.' }), options.timeout ?? DEFAULT_TIMEOUT)
     this.emit('status', { status: 'pending', message: 'Opening isolated login window...' })
-    void this.createLoginWindow(options, generation).catch(error => {
+    void this.createLoginWindow({ ...options, proxyConfig }, generation).catch(error => {
       if (error?.code === 'ERR_ABORTED' || error?.errno === -3) return
       if (this.active && this.generation === generation) this.complete({ success: false, error: loginLoadError(error?.code) })
     })
@@ -61,7 +66,7 @@ export class InAppLoginManager extends EventEmitter {
     const loginSession = session.fromPartition(`oauth-${randomUUID()}`)
     this.loginSession = loginSession
     // Both system and direct modes are fully configured before any navigation.
-    await applyProxyToSession(loginSession, options.proxyMode ?? 'system')
+    await applyProxyToSession(loginSession, options.proxyConfig ?? options.proxyMode ?? getProviderProxyConfig(options.providerId))
     if (!this.active || generation !== this.generation) return
     const config = this.config!
     // Keep the actual runtime UA and client hints; do not claim another OS or Chromium version.

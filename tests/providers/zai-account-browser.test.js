@@ -83,6 +83,7 @@ function fixture(options = {}) {
   }
   const electron = { BrowserWindow: Window, session: { fromPartition(partition) {
     const isolated = { partition, storage: new Map(), cookieWrites: [], clears: 0, connections: 0,
+      webRequest: { onBeforeRequest(handler) { isolated.before = handler }, onCompleted(handler) { isolated.completed = handler }, onErrorOccurred(handler) { isolated.errored = handler } },
       cookies: { async set(cookie) { if (options.cookieError) throw options.cookieError; isolated.cookieWrites.push(plain(cookie)) } },
       async clearStorageData() { isolated.clears++; isolated.storage.clear() },
       async closeAllConnections() { isolated.connections++ },
@@ -90,9 +91,15 @@ function fixture(options = {}) {
     sessions.push(isolated); return isolated
   } } }
   const identity = load('src/shared/accountIdentity.ts')
+  const proxy = {
+    ...require('../../src/main/network/providerContext.ts'),
+    async applyProxyToSession(session, mode, closeConnections = true) { events.push(['proxy', session.partition, plain(mode), closeConnections]); if (options.proxyWait) await options.proxyWait },
+  }
+  const sessionProxy = load('src/main/network/sessionProxy.ts', { './proxy': proxy, './providerContext.ts': require('../../src/main/network/providerContext.ts') })
   const { ZaiAccountBrowserManager } = load('src/main/oauth/zaiAccountBrowser.ts', {
     electron, '../../shared/accountIdentity': identity,
-    '../network/proxy': { async applyProxyToSession(session, mode) { events.push(['proxy', session.partition, mode]); if (options.proxyWait) await options.proxyWait } },
+    '../network/proxy': proxy,
+    '../network/sessionProxy': sessionProxy,
   }, timerGlobals)
   const manager = new ZaiAccountBrowserManager()
   return { manager, windows, sessions, requests, events, timeouts, intervals,
@@ -114,7 +121,7 @@ test('restores only token into an isolated official-origin session and verifies 
   assert.deepEqual(window.loads, [`${ORIGIN}/`, `${ORIGIN}/`])
   assert.deepEqual(session.cookieWrites, [{ url: `${ORIGIN}/`, name: 'token', value: 'fixture-token-1', path: '/', secure: true, httpOnly: false, sameSite: 'lax' }])
   assert.deepEqual(plain(window.config.webPreferences), { session: plain(session), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, allowRunningInsecureContent: false })
-  assert.equal(f.events[0][0], 'proxy'); assert.equal(f.events[0][2], 'system')
+  assert.equal(f.events[0][0], 'proxy'); assert.deepEqual(f.events[0][2], { mode: 'system' })
   assert.equal(f.requests.length, 1)
   assert.equal(f.requests[0].init.credentials, 'omit')
   assert.equal(f.requests[0].init.redirect, 'error')
@@ -302,7 +309,7 @@ test('window close settles pending operation and exact-session cleanup; secure I
   const f = fixture({ respond: () => ({ status: 401 }) })
   const pending = f.manager.authenticate({ ...config(), proxyMode: 'none' }); await tick()
   const window = f.windows[0], handler = window.webContents.openHandler
-  assert.equal(f.events[0][2], 'none')
+  assert.deepEqual(f.events[0][2], { mode: 'none' })
   assert.equal(handler({ url: 'file:///etc/passwd' }).action, 'deny')
   assert.equal(handler({ url: 'http://login.example.test/' }).action, 'deny')
   const popup = handler({ url: 'https://login.example.test/' })
@@ -320,6 +327,53 @@ test('malformed options and identities fail closed without opening a window', as
     assert.equal((await f.manager.authenticate(options)).success, false)
   }
   assert.equal(f.windows.length, 0)
+})
+
+test('same Z.ai account applies a changed custom proxy URL without clearing cookies or replacing its session', async () => {
+  const f = fixture()
+  const route = url => ({ ...config(), proxyConfig: { mode: 'custom', url } })
+  assert.equal((await f.manager.authenticate(route('http://127.0.0.1:7888'))).success, true)
+  const session = f.sessions[0], window = f.windows[0], cookies = plain(session.cookieWrites)
+  assert.equal((await f.manager.authenticate(route('socks5://127.0.0.1:7999'))).success, true)
+  assert.equal(f.sessions.length, 1); assert.equal(f.sessions[0], session)
+  assert.equal(f.windows.length, 1); assert.equal(f.windows[0], window)
+  assert.equal(session.clears, 0)
+  assert.deepEqual(session.cookieWrites, cookies)
+  assert.deepEqual(f.events.filter(event => event[0] === 'proxy').map(event => event.slice(2)), [
+    [{ mode: 'custom', url: 'http://127.0.0.1:7888' }, false],
+    [{ mode: 'custom', url: 'socks5://127.0.0.1:7999' }, false],
+  ])
+  assert.equal(session.connections, 2, 'idle pool retired after each successful route setup')
+  await f.manager.destroy()
+})
+
+test('a Z.ai proxy edit cannot interrupt an in-flight chat and applies only to the following operation', async () => {
+  const f = fixture(), hold = deferred(), entered = deferred()
+  const firstConfig = { ...config(), proxyConfig: { mode: 'custom', url: 'http://127.0.0.1:7888' } }
+  const nextConfig = { ...config(), proxyConfig: { mode: 'custom', url: 'http://127.0.0.1:7999' } }
+  const task = f.manager.withChatWindow(firstConfig, async () => { entered.resolve(); return hold.promise })
+  await entered.promise
+  const routes = f.events.filter(event => event[0] === 'proxy').length
+  assert.equal((await f.manager.authenticate(nextConfig)).errorCode, 'busy')
+  assert.equal(f.events.filter(event => event[0] === 'proxy').length, routes)
+  assert.equal(f.sessions[0].clears, 0); assert.equal(f.sessions[0].connections, 1)
+  hold.resolve('fixture completed'); assert.equal(await task, 'fixture completed')
+  assert.equal((await f.manager.authenticate(nextConfig)).success, true)
+  assert.deepEqual(f.events.filter(event => event[0] === 'proxy').at(-1).slice(2), [{ mode: 'custom', url: 'http://127.0.0.1:7999' }, false])
+  assert.equal(f.sessions[0].clears, 0)
+  await f.manager.destroy()
+})
+
+test('invalid Z.ai proxy descriptors cannot create a window or silently fall back to a direct connection', async () => {
+  for (const proxyConfig of [{ mode: 'custom' }, { mode: 'custom', url: 'http://user:secret@127.0.0.1:7888' },
+    { mode: 'custom', url: 'file:///fixture.pac' }, { mode: 'custom', url: 'http://127.0.0.1:7888/private' }, { mode: 'invalid' }]) {
+    const f = fixture()
+    const result = await f.manager.authenticate({ ...config(), proxyConfig })
+    assert.equal(result.success, false)
+    assert.equal(f.windows.length, 0); assert.equal(f.sessions.length, 0)
+    assert.equal(f.events.length, 0); assert.equal(f.requests.length, 0)
+    assert.doesNotMatch(JSON.stringify(result), /secret|fixture\.pac/)
+  }
 })
 
 test('diagnostic stages expose only bounded native codes and never error messages', async () => {

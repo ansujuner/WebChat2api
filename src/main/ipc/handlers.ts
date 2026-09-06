@@ -16,7 +16,8 @@ import { sessionManager } from '../proxy/sessionManager'
 import { TrayManager } from '../tray/TrayManager'
 import { ConfigManager } from '../store/config'
 import { generateManagementSecret } from '../proxy/middleware/managementAuth'
-import { configureNetworkProxy } from '../network/proxy'
+import { configureNetworkProxy, setProviderProxyResolver, getNetworkProxyStatus, getProviderProxyConfig, withProviderNetwork } from '../network/proxy'
+import type { ProviderNetworkProxyMode } from '../../shared/providerNetwork'
 import { updateNetworkConfiguration } from '../network/configuration'
 import { UpdaterManager } from '../updater'
 import { DeepSeekAdapter } from '../proxy/adapters/deepseek'
@@ -138,6 +139,11 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
 
   // Check if auto-start proxy is needed
   const config = storeManager.getConfig()
+  setProviderProxyResolver(id => {
+    const provider = storeManager.getProviderById(id)
+    return { mode: provider?.networkProxyMode, url: provider?.networkProxyUrl }
+  },
+    () => storeManager.getConfig().oauthProxyMode)
   try {
     await configureNetworkProxy(config.oauthProxyMode || 'system')
   } catch {
@@ -266,6 +272,8 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   })
 
   ipcMain.handle(IpcChannels.PROVIDERS_ADD, async (_, data: {
+    networkProxyMode?: ProviderNetworkProxyMode
+    networkProxyUrl?: string
     id?: string
     name: string
     type?: 'builtin' | 'custom'
@@ -281,6 +289,14 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
 
   ipcMain.handle(IpcChannels.PROVIDERS_UPDATE, async (_, id: string, updates: Partial<Provider>): Promise<Provider | null> => {
     return ProviderManager.update(id, updates)
+  })
+
+  ipcMain.handle(IpcChannels.PROVIDERS_GET_NETWORK_STATUS, async (_, id: unknown) => {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error('Invalid provider ID')
+    const provider = ProviderManager.getById(id)
+    if (!provider) throw new Error('Provider not found')
+    // Only resolve the saved provider destination. No credentials or caller-supplied URL are accepted.
+    return getNetworkProxyStatus(id, provider.apiEndpoint)
   })
 
   ipcMain.handle(IpcChannels.PROVIDERS_DELETE, async (_, id: string): Promise<boolean> => {
@@ -436,11 +452,11 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
         requestHeaders['Cookie'] = activeAccount.credentials.cookies
       }
 
-      const response = await axios.get(modelsApiEndpoint, {
+      const response = await withProviderNetwork(providerId, () => axios.get(modelsApiEndpoint, {
         headers: requestHeaders,
         timeout: 15000,
         validateStatus: () => true,
-      })
+      }))
 
       if (response.status !== 200) {
         return {
@@ -677,7 +693,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
 
     try {
       const adapter = new MiniMaxAdapter(provider, account)
-      return await adapter.getCredits()
+      return await withProviderNetwork(provider.id, () => adapter.getCredits())
     } catch (error) {
       console.error('[IPC] Failed to get credits:', error)
       return null
@@ -701,7 +717,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
         return { success: false, error: 'This feature is not available for this provider' }
       }
 
-      const success = await clearChats(provider, account)
+      const success = await withProviderNetwork(provider.id, () => clearChats(provider, account))
       return { success }
     } catch (error) {
       console.error('[IPC] Failed to clear chats:', error)
@@ -731,8 +747,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
 
   ipcMain.handle(IpcChannels.OAUTH_START_IN_APP_LOGIN, async (_, data: { providerId: string, providerType: ProviderVendor, timeout?: number }): Promise<OAuthResult> => {
     console.log('Starting in-app OAuth login:', data.providerId, data.providerType)
-    const config = storeManager.getConfig()
-    const proxyMode = config.oauthProxyMode || 'system'
+    const proxyMode = getProviderProxyConfig(data.providerId)
     return await oauthManager.startInAppLogin(data.providerId, data.providerType as ProviderType, data.timeout, proxyMode)
   })
 

@@ -242,6 +242,7 @@ for (const [code, status, expected] of [
   ['captcha_required', 403, 'captcha_required'], ['verification_required', 403, 'verification_required'],
   ['authentication_required', 401, 'authentication_required'], ['action_required', 409, 'action_required'],
   ['account_busy', 409, 'account_busy'], ['account_busy', 429, 'account_busy'],
+  ['route_changed', 409, 'route_changed'],
   ['conversation_cursor_missing', 502, 'conversation_cursor_missing'],
   ['rate_limited', 429, 'rate_limited'], ['model_rate_limited', 429, 'rate_limited'],
   ['account_temporarily_suspended', 429, 'account_cooling_down'], ['account_cooling_down', 409, 'account_cooling_down'],
@@ -276,6 +277,11 @@ for (const [code, status, expected] of [
     assert.match(result.message, /当前请求未发送/)
     assert.match(result.message, /不是额度限制/)
     assert.doesNotMatch(result.message, /登录窗口|重新登录/)
+  }
+  if (code === 'route_changed') {
+    assert.match(result.message, /等待官网手动聊天结束/)
+    assert.match(result.message, /关闭该 Arena 浏览器窗口/)
+    assert.match(result.message, /未通过旧路由发送新请求/)
   }
   if (code === 'conversation_cursor_missing') {
     assert.match(result.message, /续聊编号/)

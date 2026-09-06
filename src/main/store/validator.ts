@@ -1,3 +1,4 @@
+import { withProviderNetwork } from '../network/providerContext.ts'
 /**
  * Credential Storage Module - Credential Validation
  * Validate credentials for each provider
@@ -383,6 +384,7 @@ export async function validateCredentials(
   provider: Provider,
   credentials: Record<string, string>
 ): Promise<ValidationResult> {
+    return withProviderNetwork(provider.id, async () => {
   // Built-in providers use ProviderChecker for validation
   if (provider.type === 'builtin') {
     const tempAccount = {
@@ -411,7 +413,9 @@ export async function validateCredentials(
   } catch (error) {
     return { valid: false, error: error instanceof Error ? error.message : 'Custom API validation failed', validatedAt: Date.now() }
   }
-}
+
+    })
+  }
 
 /**
  * Batch validate credentials
@@ -452,9 +456,12 @@ export async function validateCredentialsBatch(
  * @returns Validation result
  */
 export async function validateOpenAIKey(apiKey: string): Promise<ValidationResult> {
+    return withProviderNetwork('openai', async () => {
   const validator = new OpenAIValidator('https://api.openai.com/v1')
   return validator.validate({ apiKey })
-}
+
+    })
+  }
 
 /**
  * Quick validate Claude API Key
@@ -462,9 +469,12 @@ export async function validateOpenAIKey(apiKey: string): Promise<ValidationResul
  * @returns Validation result
  */
 export async function validateClaudeKey(apiKey: string): Promise<ValidationResult> {
+    return withProviderNetwork('claude', async () => {
   const validator = new ClaudeValidator('https://api.anthropic.com/v1')
   return validator.validate({ apiKey })
-}
+
+    })
+  }
 
 /**
  * Quick validate ChatGPT Cookie
@@ -472,9 +482,12 @@ export async function validateClaudeKey(apiKey: string): Promise<ValidationResul
  * @returns Validation result
  */
 export async function validateChatGPTCookie(cookie: string): Promise<ValidationResult> {
+    return withProviderNetwork('chatgpt', async () => {
   const validator = new ChatGPTWebValidator('https://chat.openai.com')
   return validator.validate({ cookie })
-}
+
+    })
+  }
 
 export default {
   validateCredentials,

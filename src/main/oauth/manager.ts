@@ -1,3 +1,4 @@
+import { withProviderNetwork, bindProviderNetwork, getProviderProxyConfig, type ProviderProxyConfig } from '../network/providerContext.ts'
 /**
  * OAuth Flow Manager
  * Manages authentication flows for providers, including local callback server and browser login
@@ -53,7 +54,7 @@ export class OAuthManager extends EventEmitter {
    */
   private getAdapter(providerId: string, providerType: ProviderType): BaseOAuthAdapter {
     const key = `${providerId}_${providerType}`
-    
+
     if (!this.adapters.has(key)) {
       const adapter = createAdapter(providerType, {
         providerId,
@@ -61,19 +62,19 @@ export class OAuthManager extends EventEmitter {
         authMethods: [],
         callbackPort: DEFAULT_CALLBACK_PORT,
       })
-      
+
       if (this.mainWindow) {
         adapter.setMainWindow(this.mainWindow)
       }
-      
+
       adapter.setProgressCallback((event) => {
         this.emit('progress', event)
         this.sendProgressToRenderer(event)
       })
-      
+
       this.adapters.set(key, adapter)
     }
-    
+
     return this.adapters.get(key)!
   }
 
@@ -90,6 +91,7 @@ export class OAuthManager extends EventEmitter {
    * Start OAuth login flow
    */
   async startLogin(options: OAuthOptions): Promise<OAuthResult> {
+    return withProviderNetwork(options.providerId, async () => {
     if (this.currentLogin || this.inAppLoginPending || this.isInAppLoginOpen()) {
       return {
         success: false,
@@ -101,7 +103,7 @@ export class OAuthManager extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       const adapter = this.getAdapter(options.providerId, options.providerType)
-      
+
       const timeout = setTimeout(() => {
         this.cancelLogin()
         const result: OAuthResult = {
@@ -135,6 +137,8 @@ export class OAuthManager extends EventEmitter {
           reject(error)
         })
     })
+
+    })
   }
 
   /**
@@ -148,12 +152,13 @@ export class OAuthManager extends EventEmitter {
     mimoUserId?: string,
     mimoPhToken?: string
   ): Promise<OAuthResult> {
+    return withProviderNetwork(providerId, async () => {
     const adapter = this.getAdapter(providerId, providerType)
-    
+
     if ('loginWithToken' in adapter && typeof (adapter as any).loginWithToken === 'function') {
       return await (adapter as any).loginWithToken(providerId, token, realUserID, mimoUserId, mimoPhToken)
     }
-    
+
     // For Mimo, validate with all three tokens
     if (providerType === 'mimo') {
       if (!mimoUserId || !mimoPhToken) {
@@ -169,7 +174,7 @@ export class OAuthManager extends EventEmitter {
         user_id: mimoUserId,
         ph_token: mimoPhToken,
       })
-      
+
       if (!validation.valid) {
         return {
           success: false,
@@ -178,7 +183,7 @@ export class OAuthManager extends EventEmitter {
           error: validation.error || 'Token validation failed',
         }
       }
-      
+
       return {
         success: true,
         providerId,
@@ -191,9 +196,9 @@ export class OAuthManager extends EventEmitter {
         accountInfo: validation.accountInfo,
       }
     }
-    
+
     const validation = await adapter.validateToken({ token })
-    
+
     if (!validation.valid) {
       return {
         success: false,
@@ -202,7 +207,7 @@ export class OAuthManager extends EventEmitter {
         error: validation.error || 'Token validation failed',
       }
     }
-    
+
     return {
       success: true,
       providerId,
@@ -210,6 +215,8 @@ export class OAuthManager extends EventEmitter {
       credentials: { token },
       accountInfo: validation.accountInfo,
     }
+
+    })
   }
 
   /**
@@ -246,8 +253,11 @@ export class OAuthManager extends EventEmitter {
     providerType: ProviderType,
     credentials: Record<string, string>
   ): Promise<TokenValidationResult> {
+    return withProviderNetwork(providerId, async () => {
     const adapter = this.getAdapter(providerId, providerType)
     return adapter.validateToken(credentials)
+
+    })
   }
 
   /**
@@ -258,8 +268,11 @@ export class OAuthManager extends EventEmitter {
     providerType: ProviderType,
     credentials: Record<string, string>
   ): Promise<CredentialInfo | null> {
+    return withProviderNetwork(providerId, async () => {
     const adapter = this.getAdapter(providerId, providerType)
     return adapter.refreshToken(credentials)
+
+    })
   }
 
   /**
@@ -285,8 +298,9 @@ export class OAuthManager extends EventEmitter {
     providerId: string,
     providerType: ProviderType,
     timeout?: number,
-    proxyMode?: 'system' | 'none'
+    proxyMode?: ProviderProxyConfig | 'system' | 'none'
   ): Promise<OAuthResult> {
+    return withProviderNetwork(providerId, async () => {
     const loginManager = providerType === 'deepseek' ? externalBrowserLoginManager : inAppLoginManager
     if (this.inAppLoginPending || this.currentLogin || this.isInAppLoginOpen()) {
       return { success: false, providerId, providerType, error: 'A login process is already in progress' }
@@ -305,7 +319,7 @@ export class OAuthManager extends EventEmitter {
     const statusHandler = (event: { status: string; message: string }) => {
       if (active) this.sendProgressToRenderer({ status: 'pending', message: event.message })
     }
-    const validateAndComplete = async (): Promise<void> => {
+    const validateAndComplete = bindProviderNetwork(providerId, async (): Promise<void> => {
       if (!active || isValidating) return
       if (attemptedRevision === revision && Date.now() - lastAttemptTime < 5000) return
       const snapshot = { ...collectedTokens }
@@ -333,7 +347,7 @@ export class OAuthManager extends EventEmitter {
       lastAttemptTime = Date.now()
       this.sendProgressToRenderer({ status: 'pending', message: 'Checking the provider account...' })
       try {
-        const validation = await adapter.validateToken(validationCredentials)
+        const validation = await withProviderNetwork(providerId, () => adapter.validateToken(validationCredentials))
         if (!active) return
         // A newer token may belong to the account the user just switched to. Do
         // not complete using a stale validation result from the previous token.
@@ -353,7 +367,7 @@ export class OAuthManager extends EventEmitter {
           validationTimeout = setTimeout(() => { void validateAndComplete() }, 250)
         }
       }
-    }
+    })
     const tokenFoundHandler = (event: TokenFoundEvent): void => {
       if (!active || typeof event.key !== 'string' || typeof event.value !== 'string' || !event.value) return
       const cookies = event.allCookies ? JSON.stringify(event.allCookies) : undefined
@@ -370,7 +384,7 @@ export class OAuthManager extends EventEmitter {
       this.sendProgressToRenderer({ status: 'pending', message: 'Opening login window...' })
       loginManager.on('status', statusHandler)
       loginManager.on('tokenFound', tokenFoundHandler)
-      const result = await loginManager.startLogin({ providerId, providerType, timeout: timeout ?? DEFAULT_TIMEOUT, proxyMode })
+      const result = await loginManager.startLogin({ providerId, providerType, timeout: timeout ?? DEFAULT_TIMEOUT, proxyConfig: getProviderProxyConfig(providerId) })
       active = false
       this.emit('statusChange', result.success ? 'success' : 'error')
       if (result.success && result.credentials) {
@@ -389,6 +403,8 @@ export class OAuthManager extends EventEmitter {
       loginManager.off('tokenFound', tokenFoundHandler)
       collectedTokens = {}
     }
+
+    })
   }
 
   /**

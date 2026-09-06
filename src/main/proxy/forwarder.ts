@@ -1,3 +1,4 @@
+import { withProviderNetwork, bindProviderNetwork, getProviderProxyConfig } from '../network/providerContext.ts'
 /**
  * Proxy Service Module - Request Forwarder
  * Forwards requests to corresponding API based on provider configuration
@@ -505,6 +506,7 @@ export class RequestForwarder {
     actualModel: string,
     context: ProxyContext
   ): Promise<ForwardResult> {
+    return withProviderNetwork(provider.id, async () => {
     const startTime = Date.now()
 
     // Selection can become stale while context preparation is awaiting work.
@@ -631,6 +633,8 @@ export class RequestForwarder {
         latency,
       }
     }
+
+    })
   }
 
   private customApiFailure(status: unknown, latency: number, headers?: any): ForwardResult {
@@ -660,7 +664,7 @@ export class RequestForwarder {
       }
 
       const adapter = new DeepSeekAdapter(provider, account)
-      
+
       const { response, sessionId } = await adapter.chatCompletion({
         ...getForwardConversationOptions(request),
         model: actualModel,
@@ -696,13 +700,13 @@ export class RequestForwarder {
 
       // Prepare callback for deleting session
       const deleteSessionCallback = shouldDeleteSession(request)
-        ? async () => {
+        ? bindProviderNetwork(provider.id, async () => {
             try {
               await adapter.deleteSession(sessionId)
             } catch (error) {
               console.error('[DeepSeek] Failed to delete session:', error)
             }
-          }
+          })
         : undefined
 
       // DeepSeek always returns streaming response
@@ -718,10 +722,10 @@ export class RequestForwarder {
       // Nonstream restrictions are handled once by the catch below. Streaming errors arrive later.
       if (request.stream) handler.setAccountRestrictionListener(restriction => recordDeepSeekRestriction(account.id, restriction))
       attachConversationListener(request, handler)
-      
+
       if (request.stream) {
         const transformedStream = await handler.handleStream(responseData)
-        
+
         return {
           success: true,
           status: response.status,
@@ -735,9 +739,9 @@ export class RequestForwarder {
 
       // Non-streaming requests need to collect stream data and convert
       const result = await handler.handleNonStream(responseData)
-      
+
       this.applyToolCallsToResponse(result, transformed)
-      
+
       if (deleteSessionCallback) {
         await deleteSessionCallback()
       }
@@ -822,14 +826,14 @@ export class RequestForwarder {
 
       const handler = new GLMStreamHandler(actualModel, undefined, conversationId, transformed.plan)
       attachConversationListener(request, handler)
-      
+
       if (request.stream) {
         const transformedStream = await handler.handleStream(responseData)
-        
+
         // If delete session after chat is enabled, we need to handle it after stream ends
         if (shouldDeleteSession(request)) {
           const originalEnd = transformedStream.end.bind(transformedStream)
-          transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
+          transformedStream.end = bindProviderNetwork(provider.id, function(chunk?: any, encoding?: any, callback?: any) {
             const convId = handler.getConversationId()
             if (convId) {
               adapter.deleteConversation(convId).catch(err => {
@@ -837,9 +841,9 @@ export class RequestForwarder {
               })
             }
             return originalEnd(chunk, encoding, callback)
-          }
+          })
         }
-        
+
         return {
           success: true,
           status: response.status,
@@ -852,9 +856,9 @@ export class RequestForwarder {
       }
 
       const result = await handler.handleNonStream(responseData)
-      
+
       this.applyToolCallsToResponse(result, transformed)
-      
+
       if (shouldDeleteSession(request)) {
         const convId = handler.getConversationId()
         if (convId) {
@@ -895,7 +899,7 @@ export class RequestForwarder {
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
-      
+
       const adapter = new KimiAdapter(provider, account)
       const { response, conversationId } = await adapter.chatCompletion({
         ...getForwardConversationOptions(request),
@@ -924,14 +928,14 @@ export class RequestForwarder {
 
       const handler = new KimiStreamHandler(actualModel, conversationId, !!request.reasoning_effort, transformed.plan)
       attachConversationListener(request, handler)
-      
+
       if (request.stream) {
         const transformedStream = await handler.handleStream(responseData)
-        
+
         // Add delete conversation callback if needed
         if (shouldDeleteSession(request)) {
           const originalEnd = transformedStream.end.bind(transformedStream)
-          transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
+          transformedStream.end = bindProviderNetwork(provider.id, function(chunk?: any, encoding?: any, callback?: any) {
             const realChatId = handler.getConversationId()
             if (realChatId) {
               adapter.deleteConversation(realChatId).catch(err => {
@@ -939,9 +943,9 @@ export class RequestForwarder {
               })
             }
             return originalEnd(chunk, encoding, callback)
-          }
+          })
         }
-        
+
         return {
           success: true,
           status: response.status,
@@ -1026,13 +1030,13 @@ export class RequestForwarder {
       }
 
       const deleteSessionCallback = shouldDeleteSession(request)
-        ? async (sid: string) => {
+        ? bindProviderNetwork(provider.id, async (sid: string) => {
             try {
               await adapter.deleteSession(sid)
             } catch (err) {
               console.error('[Qwen] Failed to delete session:', err)
             }
-          }
+          })
         : undefined
 
       const handler = new QwenStreamHandler(actualModel, deleteSessionCallback, transformed.plan)
@@ -1091,7 +1095,7 @@ export class RequestForwarder {
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
-      
+
       const adapter = new QwenAiAdapter(provider, account)
       const { response, chatId, parentId } = await adapter.chatCompletion({
         ...getForwardConversationOptions(request),
@@ -1125,12 +1129,12 @@ export class RequestForwarder {
 
         if (shouldDeleteSession(request)) {
           const originalEnd = transformedStream.end.bind(transformedStream)
-          transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
+          transformedStream.end = bindProviderNetwork(provider.id, function(chunk?: any, encoding?: any, callback?: any) {
             adapter.deleteChat(chatId).catch(err => {
               console.error('[QwenAI] Failed to delete chat:', err)
             })
             return originalEnd(chunk, encoding, callback)
-          }
+          })
         }
 
         return {
@@ -1198,7 +1202,7 @@ export class RequestForwarder {
             && currentProvider.type === expected.providerType
         } catch { return false }
       }
-      
+
       const adapter = new ZaiAdapter(provider, account)
       const { response, chatId } = await adapter.chatCompletion({
         ...getForwardConversationOptions(request),
@@ -1209,7 +1213,7 @@ export class RequestForwarder {
         temperature: request.temperature,
         web_search: request.web_search,
         reasoning_effort: request.reasoning_effort,
-        proxyMode: storeManager.getConfig().oauthProxyMode === 'none' ? 'none' : 'system',
+        proxyConfig: getProviderProxyConfig(provider.id),
         isAccountCurrent,
       })
       const responseData = this.bindProbeCancellation(request, response.data)
@@ -1229,23 +1233,23 @@ export class RequestForwarder {
       }
 
       const deleteChatCallback = shouldDeleteSession(request)
-        ? async (cid: string) => {
+        ? bindProviderNetwork(provider.id, async (cid: string) => {
             try {
               await adapter.deleteChat(cid)
             } catch (error) {
               console.error('[Z.ai] Failed to delete chat:', error)
             }
-          }
+          })
         : undefined
 
       const handler = new ZaiStreamHandler(actualModel, deleteChatCallback, transformed.plan)
       // The website bridge verifies the persisted graph before releasing its terminal tail.
       // It is the only authoritative cursor source here: an SSE role/id must not overwrite it.
       handler.setChatId(chatId)
-      
+
       if (request.stream === true) {
         const transformedStream = await handler.handleStream(responseData)
-        
+
         return {
           success: true,
           status: response.status,
@@ -1260,7 +1264,7 @@ export class RequestForwarder {
       const result = await handler.handleNonStream(responseData)
 
       this.applyToolCallsToResponse(result, transformed)
-      
+
       if (deleteChatCallback) {
         await deleteChatCallback(chatId)
       }
@@ -1336,7 +1340,7 @@ export class RequestForwarder {
     console.log('[forwardMiniMax] provider.modelMappings:', provider.modelMappings)
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
-      
+
       const adapter = new MiniMaxAdapter(provider, account)
       const { response, stream, chatId } = await adapter.chatCompletion({
         ...getForwardConversationOptions(request),
@@ -1362,18 +1366,18 @@ export class RequestForwarder {
       }
 
       const deleteChatCallback = shouldDeleteSession(request)
-        ? async (cid: string) => {
+        ? bindProviderNetwork(provider.id, async (cid: string) => {
             try {
               await adapter.deleteChat(cid)
             } catch (error) {
               console.error('[MiniMax] Failed to delete chat:', error)
             }
-          }
+          })
         : undefined
 
       if (request.stream === true && stream) {
         console.log('[forwardMiniMax] Using polling stream')
-        
+
         if (deleteChatCallback) {
           const originalStream = stream.stream as unknown as PassThrough
           const originalEnd = originalStream.end.bind(originalStream)
@@ -1384,7 +1388,7 @@ export class RequestForwarder {
             return originalEnd(chunk, encoding, callback)
           }
         }
-        
+
         return {
           success: true,
           status: 200,
@@ -1398,7 +1402,7 @@ export class RequestForwarder {
 
       if (response) {
         this.applyToolCallsToResponse(responseData, transformed)
-        
+
         if (deleteChatCallback) {
           await deleteChatCallback(chatId)
         }
@@ -1473,13 +1477,13 @@ export class RequestForwarder {
       }
 
       const deleteSessionCallback = shouldDeleteSession(request)
-        ? async (sessionId: string) => {
+        ? bindProviderNetwork(provider.id, async (sessionId: string) => {
             try {
               await adapter.deleteSession(sessionId)
             } catch (error) {
               console.error('[Mimo] Failed to delete session:', error)
             }
-          }
+          })
         : undefined
 
       const handler = new MimoStreamHandler(actualModel, conversationId, 'separate', transformed.plan)
@@ -1576,9 +1580,9 @@ export class RequestForwarder {
     console.log('[forwardPerplexity] actualModel:', actualModel)
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
-      
+
       const adapter = new PerplexityAdapter(provider, account)
-      
+
       const { stream, sessionId } = await adapter.chatCompletion({
         ...getForwardConversationOptions(request),
         model: actualModel,
@@ -1593,19 +1597,19 @@ export class RequestForwarder {
 
       if (request.stream === true) {
         const deleteSessionCallback = shouldDeleteSession(request)
-          ? async () => {
+          ? bindProviderNetwork(provider.id, async () => {
               try {
                 await adapter.deleteSession(sessionId)
               } catch (error) {
                 console.error('[Perplexity] Failed to delete session:', error)
               }
-            }
+            })
           : undefined
 
         const handler = new PerplexityStreamHandler(actualModel, sessionId, deleteSessionCallback, adapter, transformed.plan)
         attachConversationListener(request, handler)
         const transformedStream = await handler.handleStream(responseData)
-        
+
         return {
           success: true,
           status: 200,
@@ -1620,13 +1624,13 @@ export class RequestForwarder {
       const handler = new PerplexityStreamHandler(actualModel, sessionId, undefined, adapter, transformed.plan)
       attachConversationListener(request, handler)
       const result = await handler.handleNonStream(responseData)
-      
+
       this.applyToolCallsToResponse(result, transformed)
-      
+
       if (shouldDeleteSession(request)) {
         await adapter.deleteSession(sessionId)
       }
-      
+
       return {
         success: true,
         status: 200,

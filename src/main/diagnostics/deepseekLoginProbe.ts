@@ -1,6 +1,6 @@
 import { oauthManager } from '../oauth/manager'
 import { externalBrowserLoginManager, type LoginBrowserEnvironment } from '../oauth/externalBrowserLogin'
-import { storeManager } from '../store/store'
+import { getProviderProxyConfig } from '../network/proxy'
 
 export interface DeepSeekLoginReport {
   live: false
@@ -20,7 +20,7 @@ export async function runDeepSeekLoginProbe(progress: (report: DeepSeekLoginRepo
   let environment: LoginBrowserEnvironment | null = null
   let login: Promise<void> | undefined
   try {
-    const proxyMode = storeManager.getConfig().oauthProxyMode || 'system'
+    const proxyMode = getProviderProxyConfig('deepseek')
     login = oauthManager.startInAppLogin('deepseek', 'deepseek', 10 * 60 * 1000, proxyMode).then(result => {
       successful = result.success && !!result.credentials
       settled = true

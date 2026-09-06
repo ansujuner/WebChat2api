@@ -1,3 +1,4 @@
+import { getProviderProxyConfig, normalizeNetworkProxyConfig, type ProviderProxyConfig } from '../network/providerContext.ts'
 /** DeepSeek login in a real installed browser; no Electron identity masking or fingerprint changes. */
 import { app } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -64,13 +65,16 @@ export class ExternalBrowserLoginManager extends EventEmitter {
     if (options.providerType !== 'deepseek') return { success: false, error: 'System-browser automatic login currently supports DeepSeek only.' }
     if (options.proxyMode !== undefined && !['system', 'none'].includes(options.proxyMode)) return { success: false, error: 'Invalid login proxy mode.' }
     if (options.timeout !== undefined && (!Number.isFinite(options.timeout) || options.timeout < 1000 || options.timeout > 1800000)) return { success: false, error: 'Login timeout must be between 1 second and 30 minutes.' }
+    let proxyConfig: ProviderProxyConfig
+    try { proxyConfig = normalizeNetworkProxyConfig(options.proxyConfig ?? options.proxyMode ?? getProviderProxyConfig(options.providerId)) }
+    catch { return { success: false, error: 'Invalid login proxy configuration.' } }
     let resolve!: LoginAttempt['resolve']
     const result = new Promise<InAppLoginResult>(done => { resolve = done })
     const attempt: LoginAttempt = { controller: new AbortController(), closing: false, started: Date.now(), profileRoot: null, profile: null, browser: null, child: null,
       exited: false, exitPromise: null, pipe: null, poll: null, timer: null, checking: false, launch: Promise.resolve(), completion: result, resolve }
     this.attempt = attempt
     attempt.timer = setTimeout(() => this.finish(attempt, { success: false, error: 'Login timeout. Please retry when ready to sign in.' }), options.timeout ?? DEFAULT_TIMEOUT)
-    attempt.launch = this.launch(attempt, options).catch(() => {
+    attempt.launch = this.launch(attempt, { ...options, proxyConfig }).catch(() => {
       this.finish(attempt, { success: false, error: 'The isolated browser could not be started. Check Chrome/Edge installation and local security settings, or use manual token import.' })
     })
     this.emit('status', { status: 'pending', message: 'Opening an isolated Chrome/Edge login window. Your usual browser profile will not be read.' })
@@ -97,7 +101,7 @@ export class ExternalBrowserLoginManager extends EventEmitter {
     const profileReal = await realpath(attempt.profile)
     if (profileReal !== path.resolve(attempt.profile) || path.dirname(profileReal) !== attempt.profileRoot) throw new Error('The isolated profile path changed before launch.')
     if (!this.current(attempt)) return
-    const child = spawn(attempt.browser.executable, loginBrowserArguments(attempt.profile, options.proxyMode ?? 'system'), {
+    const child = spawn(attempt.browser.executable, loginBrowserArguments(attempt.profile, options.proxyConfig ?? options.proxyMode ?? getProviderProxyConfig(options.providerId)), {
       shell: false, windowsHide: false, detached: false,
       // Chromium reads FD 3 and writes FD 4. No stderr/stdout logs containing page data are captured.
       stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], env: browserChildEnvironment(),

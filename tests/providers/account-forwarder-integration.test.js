@@ -19,6 +19,8 @@ function load(file, imports) {
     console: { log() {}, warn() {}, error() {} },
     require(name) {
       if (Object.hasOwn(imports, name)) return imports[name]
+      if (name === '../network/providerContext.ts') return require('../../src/main/network/providerContext.ts')
+      if (name === '../../shared/providerNetwork') return require('../../src/shared/providerNetwork.ts')
       if (name === 'stream') return require('node:stream')
       throw Error(`Unmocked boundary: ${name}`)
     },

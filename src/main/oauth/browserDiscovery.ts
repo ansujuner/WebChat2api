@@ -1,3 +1,4 @@
+import { normalizeNetworkProxyConfig, type ProviderProxyConfig } from '../network/providerContext.ts'
 import { execFile } from 'node:child_process'
 import { realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -55,11 +56,11 @@ export async function findInstalledLoginBrowser(signal?: AbortSignal): Promise<I
   throw new Error('No verified Google Chrome or Microsoft Edge installation was found. Install or repair the current official browser, or use manual token import.')
 }
 
-export function loginBrowserArguments(profileDirectory: string, proxyMode: 'system' | 'none'): string[] {
+export function loginBrowserArguments(profileDirectory: string, proxy: ProviderProxyConfig | 'system' | 'none'): string[] {
   if (!path.isAbsolute(profileDirectory)) throw new Error('An isolated absolute browser profile path is required.')
-  if (proxyMode !== 'system' && proxyMode !== 'none') throw new Error('Invalid login proxy mode.')
+  const config = normalizeNetworkProxyConfig(proxy)
   return [
     `--user-data-dir=${profileDirectory}`, '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check',
-    '--new-window', ...(proxyMode === 'none' ? ['--no-proxy-server'] : []), 'https://chat.deepseek.com/',
+    '--new-window', ...(config.mode === 'none' ? ['--no-proxy-server'] : config.mode === 'custom' ? [`--proxy-server=${config.url}`, '--proxy-bypass-list=<-loopback>'] : []), 'https://chat.deepseek.com/',
   ]
 }

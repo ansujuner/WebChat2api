@@ -14,7 +14,8 @@ function load(file, dependencies = {}) {
   }).outputText
   const module = { exports: {} }
   vm.runInNewContext(source, { module, exports: module.exports, Buffer, URL, ArrayBuffer, Error, setTimeout, clearTimeout,
-    require: name => Object.hasOwn(dependencies, name) ? dependencies[name] : require(name) })
+    require: name => Object.hasOwn(dependencies, name) ? dependencies[name]
+      : name === './providerContext.ts' ? require('../../src/main/network/providerContext.ts') : require(name) })
   return module.exports
 }
 function harness(reply, options = {}) {
@@ -256,5 +257,28 @@ test('proxy configuration applies system and direct explicitly; failures retain 
   rejectNext = true
   await assert.rejects(configureNetworkProxy('system'), /fixture proxy failure/)
   assert.equal(await getNetworkSession(), sessions[1])
-  await assert.rejects(applyProxyToSession(first, 'anything'), /system or none/)
+  await assert.rejects(applyProxyToSession(first, 'anything'), /Invalid network proxy configuration/)
+})
+
+test('provider proxy status snapshots its mode and actual target route across concurrent settings edits', async () => {
+  const context = require('../../src/main/network/providerContext.ts')
+  let settings = { mode: 'custom', url: 'http://127.0.0.1:18421' }
+  const resolutions = []
+  context.setProviderProxyResolver(() => settings, () => 'system')
+  const proxy = load('src/main/network/proxy.ts', {
+    electron: { app: { whenReady: async () => {} }, session: { fromPartition: () => ({
+      async setProxy(config) { this.config = config }, async closeAllConnections() {},
+      async resolveProxy(url) { resolutions.push({ url, config: this.config }); return this.config.mode === 'direct' ? 'DIRECT' : 'PROXY 127.0.0.1:18421' },
+    }) } },
+  })
+  try {
+    await proxy.configureNetworkProxy('none')
+    const pending = proxy.getNetworkProxyStatus('fixture', 'https://same-host.invalid/actual-api')
+    settings = { mode: 'none' }
+    assert.deepEqual(JSON.parse(JSON.stringify(await pending)), { mode: 'custom', route: 'proxy' })
+    assert.equal(resolutions[0].url, 'https://same-host.invalid/actual-api')
+    assert.equal(resolutions[0].config.proxyRules, 'http://127.0.0.1:18421')
+    assert.deepEqual(JSON.parse(JSON.stringify(await proxy.getNetworkProxyStatus('fixture', 'https://same-host.invalid/actual-api'))), { mode: 'none', route: 'direct' })
+    assert.equal(context.getProviderNetworkScope(), undefined)
+  } finally { context.setProviderProxyResolver(() => undefined, () => 'system') }
 })

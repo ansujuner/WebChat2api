@@ -122,6 +122,7 @@ test('safe typed failure categories preserve restriction/retry status without ra
     [502, 'browser_unavailable', 'browser_unavailable'], [404, 'model_unavailable', 'model_unavailable'],
     [502, 'incomplete_response', 'incomplete_response'], [403, 'action_required', 'action_required'],
     [409, 'account_busy', 'account_busy'], [429, 'account_busy', 'account_busy'],
+    [409, 'route_changed', 'route_changed'],
   ] as const) {
     let calls = 0
     const f = fixture({ forward: async () => { calls++; return { success: false, status, errorCode, error: 'private-token-response', headers: { 'retry-after': '60' } } } })
