@@ -1,5 +1,15 @@
 # Publication checks
 
+## v1.6.2 — existing-account re-login (2026-09-06)
+
+- Final local validation: **1,272 tests passed, 0 failed, 0 skipped** with native-browser discovery enabled; production build and flat renderer/shared type-check passed. Isolated production Electron completed **48/48 checks**.
+- The production renderer now exposes **Edit Account → OAuth Login → Sign in again** for existing non-Arena built-in website accounts. Manual editing remains available; custom API accounts and existing Arena profiles are not given an unrelated OAuth flow.
+- Component regressions cover duplicate operations, failure/incomplete results, known identity mismatches, close/reopen/account switches, stale validation and explicit-save ownership.
+- The isolated production Electron check clicks the Z.ai account menu, opens its edit dialog and OAuth tab, invokes the real preload, then supplies a synthetic OAuth response at the IPC boundary. It verifies draft-only credentials before save, updating the original account rather than creating a duplicate, retaining custom labels/limits/disable/cooldown/old authentication status, and rejecting a late response after cancellation.
+- This is **not a live website login or CAPTCHA check**: the OAuth response is deliberately synthetic, no real login window is opened, and all account data lives in the disposable workspace fixture. Restoring an expired/error authentication state requires the account-list validation action after saving; liveness separately checks chat availability.
+- The same fixture caught a missing `credentialFields` copy when creating a built-in provider in the current process: Z.ai was incorrectly requiring `jwt` rather than `token` until restart. This creation path is now covered rather than bypassed by test-only provider configuration.
+- Encryption diagnostics no longer print plaintext, ciphertext, or decrypted credential fragments. Focused tests also verify that native encryption errors cannot leak the supplied value into logs. Existing storage fallback policy is unchanged.
+
 ## v1.6.1 — tools and custom providers (2026-09-06)
 
 - Final local run: **1,255 tests passed, 0 failed, 0 skipped** (optional native-browser discovery enabled); production build succeeded. The isolated production Electron smoke completed **44/44 checks**, including real UI interactions and loopback HTTP exchanges. The four additional website-parser paths passed **37/37** focused checks.

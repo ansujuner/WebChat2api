@@ -306,7 +306,12 @@
     "updateModelsSuccess": "模型列表更新成功",
     "updateModelsFailed": "模型列表更新失败",
     "updateModelsNotSupported": "该供应商不支持动态更新模型",
-    "updatingModels": "正在更新模型列表..."
+    "updatingModels": "正在更新模型列表...",
+    "relogin": "重新登录",
+    "reloginHelp": "请使用此记录对应的同一官网账号登录。成功后点击“保存更改”；若原凭据已过期或报错，请返回账号列表，在该账号菜单中“验证凭据”，再测活。重登不代表验证码或风控已解除，不会新建或自动启用账号，也不会解除冷却。",
+    "reloginSaveRequired": "已获取登录凭据，尚未写入账号。请点击“保存更改”；若原凭据已过期或报错，保存后返回账号列表，在该账号菜单中“验证凭据”，再测活确认。",
+    "reloginIdentityMismatch": "登录身份与当前记录不一致，未替换原凭据。请登录同一账号，或通过“添加账号”保存另一个账号。",
+    "reloginInvalidCredentials": "未获取完整有效凭据，原凭据保持不变。请重新完成登录。"
   },
   "loginGuide": {
     "getToken": "获取 {{provider}} 凭证",

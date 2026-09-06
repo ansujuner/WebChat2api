@@ -306,7 +306,12 @@
     "updateModelsSuccess": "Model list updated successfully",
     "updateModelsFailed": "Failed to update model list",
     "updateModelsNotSupported": "This provider does not support dynamic model updates",
-    "updatingModels": "Updating model list..."
+    "updatingModels": "Updating model list...",
+    "relogin": "Sign in again",
+    "reloginHelp": "Sign in with the same provider account, then select “Save Changes”. If credentials were expired or invalid, return to the account list and choose “Validate credentials” in that account’s menu, then check liveness. Sign-in does not clear CAPTCHA or restrictions, create or enable an account, or release cooldown.",
+    "reloginSaveRequired": "Login credentials received but not saved. Select “Save Changes”. If credentials were expired or invalid, return to the account list and validate credentials from that account’s menu, then check liveness.",
+    "reloginIdentityMismatch": "This login belongs to a different identity. Original credentials were kept. Sign in with the same account, or use “Add Account” for another account.",
+    "reloginInvalidCredentials": "Complete valid credentials were not received. Original credentials were kept. Complete sign-in again."
   },
   "loginGuide": {
     "getToken": "Get {{provider}} Credentials",

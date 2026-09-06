@@ -155,6 +155,12 @@ export function AddAccountDialog({
   const [name, setName] = useState('')
   const nameWasEdited = useRef(false)
   const credentialRevision = useRef(0)
+  const dialogTarget = useRef({ key: '', version: 0, open: false })
+  const operation = useRef<{ version: number; credentials: number; kind: 'login' | 'validate' | 'save' } | null>(null)
+  const targetKey = `${open ? 'open' : 'closed'}:${provider?.id || ''}:${editingAccount?.id || 'new'}`
+  if (dialogTarget.current.key !== targetKey) {
+    dialogTarget.current = { key: targetKey, version: dialogTarget.current.version + 1, open }
+  }
   const [dailyLimit, setDailyLimit] = useState<string>('')
   const [credentials, setCredentials] = useState<Record<string, string>>({})
   const [isValidating, setIsValidating] = useState(false)
@@ -176,22 +182,49 @@ export function AddAccountDialog({
   const isEditing = !!editingAccount
   const builtinProvider = provider as BuiltinProviderConfig | null
   const credentialFields: CredentialField[] = builtinProvider?.credentialFields || getDefaultCredentialFields(provider?.authType, t)
-  const supportsOAuth = provider && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'arena'].includes(provider.id)
+  const supportsOAuth = provider?.type === 'builtin' && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'arena'].includes(provider.id)
+  const canLogin = supportsOAuth && (!isEditing || provider?.id !== 'arena')
+  const busy = isValidating || isSubmitting || isOAuthLoading
+
+  const beginOperation = (kind: 'login' | 'validate' | 'save') => {
+    if (!dialogTarget.current.open || operation.current) return null
+    const request = { version: dialogTarget.current.version, credentials: credentialRevision.current, kind }
+    operation.current = request
+    return request
+  }
+  const ownsOperation = (request: NonNullable<typeof operation.current>) =>
+    operation.current === request && dialogTarget.current.open && dialogTarget.current.version === request.version
+  const canApplyResult = (request: NonNullable<typeof operation.current>) =>
+    ownsOperation(request) && credentialRevision.current === request.credentials
+  const handleDialogOpenChange = (value: boolean) => {
+    if (!value) {
+      dialogTarget.current = { ...dialogTarget.current, open: false, version: dialogTarget.current.version + 1 }
+      credentialRevision.current += 1
+    }
+    onOpenChange(value)
+  }
 
   useEffect(() => {
+    credentialRevision.current += 1
+    operation.current = null
+    setIsValidating(false)
+    setIsSubmitting(false)
+    setIsOAuthLoading(false)
+    setOAuthStatus('')
     if (open) {
       if (editingAccount) {
         setName(editingAccount.name)
         nameWasEdited.current = editingAccount.nameSource !== 'auto'
         setValidationResult({})
         setDailyLimit(editingAccount.dailyLimit?.toString() || '')
-        setCredentials(editingAccount.credentials || {})
+        setCredentials({ ...(editingAccount.credentials || {}) })
         setActiveTab(provider?.id === 'arena' ? 'oauth' : 'manual')
       } else {
         resetForm()
       }
     }
-  }, [open, editingAccount, provider?.id])
+    return () => { dialogTarget.current.version += 1; credentialRevision.current += 1 }
+  }, [open, editingAccount?.id, provider?.id])
 
   const resetForm = () => {
     credentialRevision.current += 1
@@ -206,6 +239,7 @@ export function AddAccountDialog({
   }
 
   const handleCredentialChange = (fieldName: string, value: string) => {
+    if (operation.current) return
     credentialRevision.current += 1
     setCredentials(prev => ({
       ...prev,
@@ -223,7 +257,7 @@ export function AddAccountDialog({
   }
 
   const handleValidate = async () => {
-    if (!provider) return
+    if (!provider || !open || operation.current) return
 
     const requiredFields = credentialFields.filter(f => f.required)
     const missingFields = requiredFields.filter(f => !credentials[f.name])
@@ -236,29 +270,32 @@ export function AddAccountDialog({
       return
     }
 
+    const request = beginOperation('validate')
+    if (!request) return
     setIsValidating(true)
     setValidationResult({})
-    const revision = credentialRevision.current
 
     try {
-      const result = await onValidateToken(provider.id, credentials)
-      if (revision !== credentialRevision.current) return
+      const result = await onValidateToken(provider.id, { ...credentials })
+      if (!canApplyResult(request)) return
       setValidationResult(result)
 
       if (result.valid && result.userInfo) {
         applyValidatedName(result.userInfo)
       }
     } catch (error) {
+      if (!canApplyResult(request)) return
       setValidationResult({
         valid: false,
         error: error instanceof Error ? error.message : t('providers.validateFailed'),
       })
     } finally {
-      setIsValidating(false)
+      if (ownsOperation(request)) { operation.current = null; setIsValidating(false) }
     }
   }
 
   const handleSubmit = async () => {
+    if (!provider || !open || operation.current) return
     if (provider?.id === 'arena' && !isEditing && !validationResult.valid) return
     const requiredFields = credentialFields.filter(f => f.required)
     const missingFields = requiredFields.filter(f => !credentials[f.name])
@@ -271,6 +308,8 @@ export function AddAccountDialog({
       return
     }
 
+    const request = beginOperation('save')
+    if (!request) return
     setIsSubmitting(true)
 
     try {
@@ -282,28 +321,33 @@ export function AddAccountDialog({
         dailyLimit: dailyLimit ? parseInt(dailyLimit, 10) : undefined,
       }
 
-      if (isEditing && editingAccount && onUpdateAccount) {
+      if (isEditing && editingAccount) {
+        if (!onUpdateAccount) throw new Error(t('providers.saveFailed'))
         await onUpdateAccount(editingAccount.id, data)
       } else {
         await onAddAccount(data)
       }
 
+      if (!canApplyResult(request)) return
       onOpenChange(false)
       resetForm()
     } catch (error) {
+      if (!canApplyResult(request)) return
       setValidationResult({
         valid: false,
         error: error instanceof Error ? error.message : t('providers.saveFailed'),
       })
     } finally {
-      setIsSubmitting(false)
+      if (ownsOperation(request)) { operation.current = null; setIsSubmitting(false) }
     }
   }
 
   const handleOpenOAuthBrowser = async () => {
-    if (!provider) return
-    
+    if (!provider || !canLogin) return
+    const request = beginOperation('login')
+    if (!request) return
     setIsOAuthLoading(true)
+    setValidationResult({})
     setOAuthStatus(t('providers.openingLoginWindow'))
     
     try {
@@ -311,13 +355,29 @@ export function AddAccountDialog({
         provider.id,
         provider.id as ProviderVendor
       )
+      if (!canApplyResult(request)) return
       
       if (result?.success && result.credentials) {
+        const previousUserId = accountUserId(editingAccount?.providerUserId)
+        const nextUserId = accountUserId(result.accountInfo?.userId)
+        const previousEmail = accountEmail(editingAccount?.email)
+        const nextEmail = accountEmail(result.accountInfo?.email)
+        if ((previousUserId && nextUserId && previousUserId !== nextUserId)
+          || (previousEmail && nextEmail && previousEmail.toLowerCase() !== nextEmail.toLowerCase())) {
+          setOAuthStatus(t('providers.reloginIdentityMismatch'))
+          return
+        }
         // Map OAuth credentials to provider credential field names
         const mappedCredentials = mapOAuthCredentials(provider?.id, result.credentials)
+        if (!mappedCredentials || Array.isArray(mappedCredentials) || !Object.keys(mappedCredentials).length
+          || Object.values(mappedCredentials).some(value => typeof value !== 'string')
+          || credentialFields.some(field => field.required && !mappedCredentials[field.name]?.trim())) {
+          setOAuthStatus(t('providers.reloginInvalidCredentials'))
+          return
+        }
         credentialRevision.current += 1
-        setCredentials(mappedCredentials)
-        setOAuthStatus(t('providers.loginSuccess'))
+        setCredentials({ ...mappedCredentials })
+        setOAuthStatus(t(isEditing ? 'providers.reloginSaveRequired' : 'providers.loginSuccess'))
         
         applyValidatedName(result.accountInfo)
         
@@ -329,18 +389,17 @@ export function AddAccountDialog({
         const errorMsg = result?.error || ''
         const translatedError = errorMsg === 'Login window was closed' 
           ? t('providers.loginWindowClosed')
-          : errorMsg === 'A login window is already open'
+          : errorMsg === 'A login window is already open' || errorMsg === 'A login process is already in progress'
             ? t('providers.loginWindowAlreadyOpen')
             : errorMsg.includes('Guest account') 
               ? t('providers.guestAccountNotAllowed')
-              : errorMsg || t('providers.loginFailed')
+              : t('providers.loginFailed')
         setOAuthStatus(translatedError)
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : t('providers.loginFailed')
-      setOAuthStatus(errorMessage)
+      if (canApplyResult(request)) setOAuthStatus(t('providers.loginFailed'))
     } finally {
-      setIsOAuthLoading(false)
+      if (ownsOperation(request)) { operation.current = null; setIsOAuthLoading(false) }
     }
   }
 
@@ -348,7 +407,7 @@ export function AddAccountDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -367,7 +426,9 @@ export function AddAccountDialog({
                 id="name"
                 placeholder={t('providers.accountNamePlaceholder')}
                 value={name}
+                disabled={busy}
                 onChange={(e) => {
+                  if (operation.current) return
                   nameWasEdited.current = !!e.target.value.trim()
                   setName(e.target.value)
                 }}
@@ -382,15 +443,16 @@ export function AddAccountDialog({
                 type="number"
                 placeholder={t('providers.dailyLimitPlaceholder')}
                 value={dailyLimit}
-                onChange={(e) => setDailyLimit(e.target.value)}
+                disabled={busy}
+                onChange={(e) => { if (!operation.current) setDailyLimit(e.target.value) }}
               />
             </div>
 
-            {supportsOAuth && !isEditing && (
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
+            {canLogin && (
+              <Tabs value={activeTab} onValueChange={value => { if (!operation.current) setActiveTab(value) }}>
                 <TabsList className={provider?.id === 'arena' ? 'grid w-full grid-cols-1' : 'grid w-full grid-cols-2'}>
-                  {provider?.id !== 'arena' && <TabsTrigger value="manual">{t('providers.manualInput')}</TabsTrigger>}
-                  <TabsTrigger value="oauth">{t(provider?.id === 'arena' ? 'arena.browserLogin' : 'providers.oauthLogin')}</TabsTrigger>
+                  {provider?.id !== 'arena' && <TabsTrigger value="manual" disabled={busy}>{t('providers.manualInput')}</TabsTrigger>}
+                  <TabsTrigger value="oauth" disabled={busy}>{t(provider?.id === 'arena' ? 'arena.browserLogin' : 'providers.oauthLogin')}</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="manual" className="mt-4">
@@ -400,6 +462,7 @@ export function AddAccountDialog({
                     onChange={handleCredentialChange}
                     t={t}
                     providerId={provider?.id}
+                    disabled={busy}
                   />
                 </TabsContent>
 
@@ -410,12 +473,13 @@ export function AddAccountDialog({
                         {t(provider?.id === 'arena' ? 'arena.browserLoginHelp' : provider?.id === 'deepseek' ? 'deepseek.externalBrowserLoginHelp' : 'providers.clickToOpenOAuth')}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {t(provider?.id === 'arena' ? 'arena.profileOnlyHelp' : 'providers.oauthAutoCapture')}
+                        {t(provider?.id === 'arena' ? 'arena.profileOnlyHelp' : isEditing ? 'providers.reloginHelp' : 'providers.oauthAutoCapture')}
                       </p>
                     </div>
                     <Button 
                       onClick={handleOpenOAuthBrowser}
-                      disabled={isOAuthLoading}
+                      disabled={busy}
+                      data-testid="account-oauth-login"
                     >
                       {isOAuthLoading ? (
                         <>
@@ -425,12 +489,12 @@ export function AddAccountDialog({
                       ) : (
                         <>
                           <ExternalLink className="mr-2 h-4 w-4" />
-                          {t(provider?.id === 'arena' ? 'arena.browserLogin' : 'providers.openOAuthLogin')}
+                          {t(provider?.id === 'arena' ? 'arena.browserLogin' : isEditing ? 'providers.relogin' : 'providers.openOAuthLogin')}
                         </>
                       )}
                     </Button>
                     {oauthStatus && !isOAuthLoading && (
-                      <p className={`text-sm ${validationResult.valid ? 'text-green-600' : 'text-red-500'}`}>
+                      <p role="status" className={`text-sm ${validationResult.valid ? 'text-green-600' : 'text-red-500'}`}>
                         {oauthStatus}
                       </p>
                     )}
@@ -440,13 +504,14 @@ export function AddAccountDialog({
             )}
 
             {provider?.id === 'arena' && isEditing && <p className="text-sm text-muted-foreground">{t('arena.profileOnlyHelp')}</p>}
-            {provider?.id !== 'arena' && (!supportsOAuth || isEditing) && (
+            {provider?.id !== 'arena' && !canLogin && (
               <CredentialFieldsForm
                 fields={credentialFields}
                 credentials={credentials}
                 onChange={handleCredentialChange}
                 t={t}
                 providerId={provider?.id}
+                disabled={busy}
               />
             )}
 
@@ -475,7 +540,7 @@ export function AddAccountDialog({
           <DialogFooter className="mt-6">
             <Button
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={() => handleDialogOpenChange(false)}
               disabled={isSubmitting}
             >
               {t('common.cancel')}
@@ -483,7 +548,7 @@ export function AddAccountDialog({
             <Button
               variant="outline"
               onClick={handleValidate}
-              disabled={isValidating || isSubmitting}
+              disabled={busy}
             >
               {isValidating ? (
                 <>
@@ -499,7 +564,7 @@ export function AddAccountDialog({
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={isSubmitting || isValidating || (provider?.id === 'arena' && !isEditing && !validationResult.valid)}
+              disabled={busy || (provider?.id === 'arena' && !isEditing && !validationResult.valid)}
             >
               {isSubmitting ? (
                 <>
@@ -523,9 +588,10 @@ interface CredentialFieldsFormProps {
   onChange: (fieldName: string, value: string) => void
   t: (key: string) => string
   providerId?: string
+  disabled?: boolean
 }
 
-function CredentialFieldsForm({ fields, credentials, onChange, t, providerId }: CredentialFieldsFormProps) {
+function CredentialFieldsForm({ fields, credentials, onChange, t, providerId, disabled }: CredentialFieldsFormProps) {
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({})
   const [copiedFields, setCopiedFields] = useState<Record<string, boolean>>({})
 
@@ -670,6 +736,7 @@ function CredentialFieldsForm({ fields, credentials, onChange, t, providerId }: 
                   className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 pr-20"
                   placeholder={translated.placeholder}
                   value={fieldValue}
+                  disabled={disabled}
                   onChange={(e) => onChange(field.name, e.target.value)}
                 />
                 <div className="absolute right-1 top-1 flex gap-0.5">
@@ -679,7 +746,7 @@ function CredentialFieldsForm({ fields, credentials, onChange, t, providerId }: 
                     size="sm"
                     className="h-7 w-7 p-0"
                     onClick={() => copyToClipboard(field.name, fieldValue)}
-                    disabled={!fieldValue}
+                    disabled={disabled || !fieldValue}
                   >
                     {isCopied ? (
                       <Check className="h-4 w-4 text-green-500" />
@@ -693,6 +760,7 @@ function CredentialFieldsForm({ fields, credentials, onChange, t, providerId }: 
                     size="sm"
                     className="h-7 w-7 p-0"
                     onClick={() => toggleFieldVisibility(field.name)}
+                    disabled={disabled}
                   >
                     {isVisible ? (
                       <EyeOff className="h-4 w-4 text-muted-foreground" />
@@ -709,6 +777,7 @@ function CredentialFieldsForm({ fields, credentials, onChange, t, providerId }: 
                   type={isVisible ? 'text' : 'password'}
                   placeholder={translated.placeholder}
                   value={fieldValue}
+                  disabled={disabled}
                   onChange={(e) => onChange(field.name, e.target.value)}
                   className="pr-20"
                 />
@@ -719,7 +788,7 @@ function CredentialFieldsForm({ fields, credentials, onChange, t, providerId }: 
                     size="sm"
                     className="h-7 w-7 p-0"
                     onClick={() => copyToClipboard(field.name, fieldValue)}
-                    disabled={!fieldValue}
+                    disabled={disabled || !fieldValue}
                   >
                     {isCopied ? (
                       <Check className="h-4 w-4 text-green-500" />
@@ -733,6 +802,7 @@ function CredentialFieldsForm({ fields, credentials, onChange, t, providerId }: 
                     size="sm"
                     className="h-7 w-7 p-0"
                     onClick={() => toggleFieldVisibility(field.name)}
+                    disabled={disabled}
                   >
                     {isVisible ? (
                       <EyeOff className="h-4 w-4 text-muted-foreground" />
@@ -748,6 +818,7 @@ function CredentialFieldsForm({ fields, credentials, onChange, t, providerId }: 
                 type={field.type}
                 placeholder={translated.placeholder}
                 value={fieldValue}
+                disabled={disabled}
                 onChange={(e) => onChange(field.name, e.target.value)}
               />
             )}

@@ -365,13 +365,14 @@ export class StoreManager {
           authType: builtinConfig.authType,
           apiEndpoint: builtinConfig.apiEndpoint,
           chatPath: builtinConfig.chatPath,
-          headers: builtinConfig.headers,
+          headers: { ...builtinConfig.headers },
           enabled: true,
           createdAt: now,
           updatedAt: now,
           description: builtinConfig.description,
-          supportedModels: builtinConfig.supportedModels,
-          modelMappings: builtinConfig.modelMappings,
+          supportedModels: builtinConfig.supportedModels ? [...builtinConfig.supportedModels] : undefined,
+          modelMappings: builtinConfig.modelMappings ? { ...builtinConfig.modelMappings } : undefined,
+          credentialFields: builtinConfig.credentialFields.map(field => ({ ...field })),
         }
         this.store!.set('providers', [...providers, newProvider])
         console.log('[Store] Created missing provider:', providerId)
@@ -427,21 +428,14 @@ export class StoreManager {
    */
   encryptData(data: string): string {
     try {
-      console.log('[Store] encryptData input length:', data.length, 'content:', data.substring(0, 20) + '...')
       if (safeStorage.isEncryptionAvailable()) {
-        // Create new Buffer to store encryption result
-        const encrypted = Buffer.from(safeStorage.encryptString(data))
-        const result = encrypted.toString('base64')
-        console.log('[Store] encryptData output length:', result.length, 'content:', result.substring(0, 20) + '...')
-        // Verify encryption is correct
-        const decrypted = safeStorage.decryptString(encrypted)
-        console.log('[Store] encryptData verify decryption:', decrypted.substring(0, 20) + '...', 'match:', decrypted === data)
-        return result
+        return Buffer.from(safeStorage.encryptString(data)).toString('base64')
       } else {
-        console.log('[Store] Encryption unavailable, returning original data')
+        console.warn('[Store] Credential encryption is unavailable; existing storage fallback remains in use.')
       }
-    } catch (error) {
-      console.error('Failed to encrypt data:', error)
+    } catch {
+      // Native errors can contain sensitive input. Never log credentials, ciphertext, or error objects.
+      console.error('[Store] Credential encryption failed; existing storage fallback remains in use.')
     }
     return data
   }
@@ -457,8 +451,8 @@ export class StoreManager {
         const buffer = Buffer.from(encryptedData, 'base64')
         return safeStorage.decryptString(buffer)
       }
-    } catch (error) {
-      console.error('Failed to decrypt data:', error)
+    } catch {
+      console.error('[Store] Credential decryption failed; stored data could not be decoded.')
     }
     return encryptedData
   }

@@ -7,6 +7,14 @@ The original copyright and **GPL-3.0-or-later** grant are retained in
 
 ## Changes from the supplied project
 
+- v1.6.2 (2026-09-06): restored the missing OAuth entry when editing an
+  existing non-Arena website account. Re-login requires explicit save to the
+  original account and preserves scheduling controls. Added UI lifecycle and
+  stale-login regression checks, copied first-created providers' credential
+  definitions immediately, and removed credential fragments from encryption
+  diagnostics. Refreshing login is not proof that a website
+  captcha or chat restriction has been resolved.
+
 - v1.6.1 (2026-09-06): restored native custom-provider tools and stateless
   tool-result round trips; classified upstream verification/auth/quota blocks
   separately from tool parsing. Enabled custom-provider creation, editing,

@@ -46,7 +46,7 @@ async function setupDialog({ customName, email = 'login@example.test' } = {}) {
     },
   }, { filename: componentFile })
   const props = {
-    open: true, provider: { id: 'deepseek', name: 'DeepSeek', credentialFields: [{ name: 'token', required: true }] },
+    open: true, provider: { id: 'deepseek', type: 'builtin', name: 'DeepSeek', credentialFields: [{ name: 'token', required: true }] },
     onOpenChange() {}, onAddAccount: async data => { created.push(plain(data)) },
     onValidateToken: async () => ({ valid: true, userInfo: { email, userId: 'public-uid', name: 'Generic User' } }),
   }
