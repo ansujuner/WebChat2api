@@ -93,22 +93,15 @@ jobs:
       - name: Check packaging tools
         run: NODE_PATH="$PWD/node_modules" node --test ../tests/build/platform-package.test.js
       - name: Run regression suite
-        run: node --test --test-reporter=tap --test-concurrency=4 "tests/**/*.test.*" > artifacts/tests.tap 2>&1 || { tail -100 artifacts/tests.tap; exit 1; }
+        run: node ../scripts/run-platform-tests.cjs "$PWD"
       - name: Build and typecheck
+        id: app_build
         run: npm run build
       - name: Prepare Linux Electron sandbox
         if: matrix.platform == 'linux'
         run: |
           sudo chown root:root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
-      - name: Run isolated production application checks
-        run: |
-          ELECTRON_PATH="$(node -p "require('electron')")"
-          if [ "$TARGET_PLATFORM" = linux ]; then
-            xvfb-run -a node scripts/smoke-app.cjs --electron "$ELECTRON_PATH"
-          else
-            node scripts/smoke-app.cjs --electron "$ELECTRON_PATH"
-          fi
       - name: Package macOS application
         if: matrix.platform == 'darwin'
         run: |
@@ -139,6 +132,14 @@ jobs:
             sudo chown root:root "$APP_DIR/chrome-sandbox"
             sudo chmod 4755 "$APP_DIR/chrome-sandbox"
             xvfb-run -a node ../scripts/smoke-packaged-app.cjs --source "$PWD" --executable "$PWD/$APP_DIR/chat2api" --report "$PWD/artifacts/packaged-app-smoke.json"
+          fi
+      - name: Run isolated production application checks
+        if: ${{ !cancelled() && steps.app_build.outcome == 'success' }}
+        run: |
+          if [ "$TARGET_PLATFORM" = linux ]; then
+            xvfb-run -a node ../scripts/run-platform-smoke.cjs --source "$PWD"
+          else
+            node ../scripts/run-platform-smoke.cjs --source "$PWD"
           fi
       - name: Stage only verified release assets
         run: |

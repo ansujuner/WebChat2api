@@ -17,9 +17,11 @@ const appDir = process.platform === 'darwin'
   : path.join(source, 'dist', process.arch === 'arm64' ? 'linux-arm64-unpacked' : 'linux-unpacked')
 const resourcesRelative = process.platform === 'darwin' ? 'Contents/Resources' : 'resources'
 function compare(directory) {
-  for (const file of ['app.asar', 'sha3_wasm_bg.7b9ca65ddd.wasm', 'build/icon.png']) {
+  for (const file of ['app.asar', ...report.resources.map(resource => resource.name)]) {
     assert.equal(hash(path.join(directory, resourcesRelative, file)), hash(path.join(appDir, resourcesRelative, file)), `Installer resource mismatch: ${file}`)
   }
+  const executable = process.platform === 'darwin' ? 'Contents/MacOS/Chat2API' : 'chat2api'
+  assert.equal(hash(path.join(directory, executable)), report.executable.sha256, 'Installer executable differs from the verified native binary')
 }
 const checks = []
 for (const asset of report.assets) {

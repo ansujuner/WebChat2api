@@ -48,7 +48,7 @@ async function createRoutingFixture(options = {}) {
     },
     getAccountsByProviderId: providerId => accounts.filter(account => account.providerId === providerId),
   })
-  const fileName = join(root, 'src/main/proxy/loadBalancer.ts')
+  const fileName = join(root, 'src/main/proxy/loadbalancer.ts')
   const { outputText, diagnostics } = ts.transpileModule(readFileSync(fileName, 'utf8'), {
     fileName,
     reportDiagnostics: true,

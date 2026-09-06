@@ -9,6 +9,9 @@ const integrity = read('package-integrity.json')
 const smoke = read('runtime-app-smoke.json')
 const packaged = read('packaged-app-smoke.json')
 const containers = read('container-checks.json')
+const testCompatibility = read('test-compatibility.json')
+assert.equal(testCompatibility.applicationSourceModified, false)
+assert.equal(testCompatibility.releasedTestRestored, true)
 assert.equal(containers.passed, true)
 assert.deepEqual([...containers.checks].sort(), integrity.assets.map(a => a.name).sort())
 assert.equal(integrity.passed, true)
@@ -45,7 +48,7 @@ const assets = integrity.assets.map(asset => {
 })
 const manifest = {
   version: integrity.version, sourceCommit: commit, platform: integrity.platform, arch: integrity.arch,
-  nativeBuild: true, tests, isolatedApplicationChecks: smoke.checks.length,
+  nativeBuild: true, tests, testCompatibility, isolatedApplicationChecks: smoke.checks.length,
   isolatedApplicationPassed: true, packagedApplicationPassed: true, cleanQuit: true,
   installerContainersPassed: true,
   productionProfileUsed: false, versions: smoke.versions,

@@ -36,6 +36,10 @@ they do not add platform support to Windows-only login features.
 1. Confirm the source version/tag and native runner architecture.
 2. Fresh `npm ci`, regression tests, strict main/renderer type checks, and build.
    Windows-only regression cases remain explicitly skipped on non-Windows hosts.
+   The v1.6.7 test fixture references `loadBalancer.ts` rather than the tracked
+   `loadbalancer.ts`. The runner corrects this single test-only path for the
+   regression suite, records the correction, then restores the original test
+   before building. No assertion is removed and no application input is modified.
 3. Run the existing isolated production-application smoke checks, with only local
    synthetic fixtures and no real provider accounts or production profiles.
 4. Inspect every ASAR build/legal file and external icon/WASM byte against the
