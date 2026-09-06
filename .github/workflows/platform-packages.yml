@@ -63,8 +63,18 @@ jobs:
           node-version: '24.13.0'
           cache: npm
           cache-dependency-path: source/package-lock.json
+      - name: Prepare short native workspace
+        working-directory: .
+        run: |
+          SHORT_ROOT="$(mktemp -d /tmp/cXXXXXX)"
+          case "$SHORT_ROOT" in /tmp/c??????) ;; *) exit 1 ;; esac
+          cp -R "$GITHUB_WORKSPACE/." "$SHORT_ROOT/"
+          mv "$SHORT_ROOT/source" "$SHORT_ROOT/s"
+          BUILD_ROOT="$(cd "$SHORT_ROOT" && pwd -P)"
+          echo "BUILD_ROOT=$BUILD_ROOT" >> "$GITHUB_ENV"
       - name: Verify source and native architecture
         run: |
+          cd "$BUILD_ROOT/s"
           node - <<'NODE'
           const assert = require('node:assert/strict');
           const p = require('./package.json');
@@ -90,41 +100,37 @@ jobs:
       - name: Install Linux desktop test dependencies
         if: matrix.platform == 'linux'
         run: |
+          cd "$BUILD_ROOT/s"
           sudo apt-get update
           sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2t64 libgbm1 libxss1 libfuse2t64 ruby ruby-dev build-essential
           sudo gem install fpm --version 1.15.1 --no-document
       - name: Install locked dependencies
-        run: npm ci
+        run: |
+          cd "$BUILD_ROOT/s"
+          npm ci
       - name: Check packaging tools
-        run: NODE_PATH="$PWD/node_modules" node --test ../tests/build/platform-package.test.js
+        run: |
+          cd "$BUILD_ROOT/s"
+          NODE_PATH="$PWD/node_modules" node --test ../tests/build/platform-package.test.js
       - name: Run regression suite
-        run: node ../scripts/run-platform-tests.cjs "$PWD"
+        run: |
+          cd "$BUILD_ROOT/s"
+          node ../scripts/run-platform-tests.cjs "$PWD"
       - name: Build and typecheck
         id: app_build
-        run: npm run build
+        run: |
+          cd "$BUILD_ROOT/s"
+          npm run build
       - name: Prepare Linux Electron sandbox
         if: matrix.platform == 'linux'
         run: |
+          cd "$BUILD_ROOT/s"
           sudo chown root:root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
-      - name: Create disposable macOS test keychain
-        if: matrix.platform == 'darwin'
-        run: |
-          mkdir -p .audit-cache
-          KEYCHAIN="$PWD/.audit-cache/native-test.keychain-db"
-          security default-keychain -d user > .audit-cache/original-default-keychain.txt
-          security list-keychains -d user > .audit-cache/original-keychains.txt
-          TEST_PASSWORD="$(openssl rand -hex 24)"
-          echo "::add-mask::$TEST_PASSWORD"
-          security create-keychain -p "$TEST_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 7200 "$KEYCHAIN"
-          security unlock-keychain -p "$TEST_PASSWORD" "$KEYCHAIN"
-          security list-keychains -d user -s "$KEYCHAIN"
-          security default-keychain -d user -s "$KEYCHAIN"
-          unset TEST_PASSWORD
       - name: Run isolated production application checks
         if: ${{ !cancelled() && steps.app_build.outcome == 'success' }}
         run: |
+          cd "$BUILD_ROOT/s"
           if [ "$TARGET_PLATFORM" = linux ]; then
             xvfb-run -a node ../scripts/run-platform-smoke.cjs --source "$PWD"
           else
@@ -133,6 +139,7 @@ jobs:
       - name: Package macOS application
         if: matrix.platform == 'darwin'
         run: |
+          cd "$BUILD_ROOT/s"
           npx --no-install electron-builder --config artifacts/platform-builder.json --mac --dir --"$TARGET_ARCH" --publish never
           MAC_DIR=dist/mac
           if [ "$TARGET_ARCH" = arm64 ]; then MAC_DIR=dist/mac-arm64; fi
@@ -141,15 +148,22 @@ jobs:
           npx --no-install electron-builder --config artifacts/platform-builder.json --mac dmg zip --"$TARGET_ARCH" --prepackaged "$MAC_DIR/Chat2API.app" --publish never
       - name: Package Linux application
         if: matrix.platform == 'linux'
-        run: npx --no-install electron-builder --config artifacts/platform-builder.json --linux AppImage deb tar.gz --"$TARGET_ARCH" --publish never
+        run: |
+          cd "$BUILD_ROOT/s"
+          npx --no-install electron-builder --config artifacts/platform-builder.json --linux AppImage deb tar.gz --"$TARGET_ARCH" --publish never
         env:
           USE_SYSTEM_FPM: 'true'
       - name: Verify package bytes and executable architecture
-        run: node ../scripts/verify-platform-package.cjs --source "$PWD" --platform "$TARGET_PLATFORM" --arch "$TARGET_ARCH" --output "$PWD/artifacts/package-integrity.json"
+        run: |
+          cd "$BUILD_ROOT/s"
+          node ../scripts/verify-platform-package.cjs --source "$PWD" --platform "$TARGET_PLATFORM" --arch "$TARGET_ARCH" --output "$PWD/artifacts/package-integrity.json"
       - name: Verify actual installer container contents
-        run: node ../scripts/check-platform-containers.cjs "$PWD"
+        run: |
+          cd "$BUILD_ROOT/s"
+          node ../scripts/check-platform-containers.cjs "$PWD"
       - name: Run actual packaged application
         run: |
+          cd "$BUILD_ROOT/s"
           if [ "$TARGET_PLATFORM" = darwin ]; then
             APP_DIR=dist/mac
             if [ "$TARGET_ARCH" = arm64 ]; then APP_DIR=dist/mac-arm64; fi
@@ -163,13 +177,14 @@ jobs:
           fi
       - name: Stage only verified release assets
         run: |
+          cd "$BUILD_ROOT/s"
           node ../scripts/stage-platform-assets.cjs "$PWD"
           git diff --exit-code
       - name: Upload validated packages
         uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.platform }}-${{ matrix.arch }}
-          path: source/artifacts/release-assets/*
+          path: ${{ env.BUILD_ROOT }}/s/artifacts/release-assets/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -179,27 +194,10 @@ jobs:
         with:
           name: checks-${{ matrix.platform }}-${{ matrix.arch }}
           path: |
-            source/artifacts/*.json
-            source/artifacts/*.tap
-            source/artifacts/source-commit.txt
+            ${{ env.BUILD_ROOT }}/s/artifacts/*.json
+            ${{ env.BUILD_ROOT }}/s/artifacts/*.tap
+            ${{ env.BUILD_ROOT }}/s/artifacts/source-commit.txt
           retention-days: 7
-      - name: Remove disposable macOS test keychain
-        if: always() && matrix.platform == 'darwin'
-        run: |
-          KEYCHAIN="$PWD/.audit-cache/native-test.keychain-db"
-          if [ -f "$KEYCHAIN" ]; then
-            python3 - <<'PY'
-          from pathlib import Path
-          import shlex, subprocess
-          root = Path('.audit-cache')
-          original = shlex.split((root / 'original-default-keychain.txt').read_text())
-          keychains = shlex.split((root / 'original-keychains.txt').read_text())
-          assert len(original) == 1 and all(Path(value).is_absolute() for value in original + keychains)
-          subprocess.run(['/usr/bin/security', 'default-keychain', '-d', 'user', '-s', *original], check=True)
-          subprocess.run(['/usr/bin/security', 'list-keychains', '-d', 'user', '-s', *keychains], check=True)
-          PY
-            security delete-keychain "$KEYCHAIN"
-          fi
 
   publish:
     name: Upload verified packages to existing release

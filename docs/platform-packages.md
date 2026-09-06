@@ -6,6 +6,11 @@ Build tooling comes from the workflow commit; the application comes from a separ
 checkout of the selected source tag. Both commits are recorded in the published
 `BINARY-MANIFEST.json`.
 
+Native jobs copy these checkouts into a fresh short `/tmp/cXXXXXX` build directory
+before installing dependencies. This prevents Chromium's `SingletonSocket` path
+from exceeding POSIX socket limits inside the otherwise isolated test profiles;
+it does not change application code or disable single-instance protection.
+
 ## Targets
 
 | Platform | Native runner | Files |
@@ -42,8 +47,9 @@ they do not add platform support to Windows-only login features.
    before building. No assertion is removed and no application input is modified.
 3. Run the existing isolated production-application smoke checks, with only local
    synthetic fixtures and no real provider accounts or production profiles.
-   macOS tests use a newly created, unlocked disposable Keychain rather than the
-   runner image's reused/default keychain. Native `safeStorage` is not mocked.
+   macOS tests create a new unlocked Keychain within each isolated HOME, including
+   the native preferences directories, instead of using the runner's existing
+   keychains. Each test removes only its own Keychain. Native `safeStorage` is not mocked.
 4. Inspect every ASAR build/legal file and external icon/WASM byte against the
    build inputs; check the executable's Mach-O/ELF architecture.
 5. Extract every installer without installing it, compare contained ASAR/resources,

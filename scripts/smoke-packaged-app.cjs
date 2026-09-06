@@ -148,14 +148,14 @@ async function main() {
     if (/^(ELECTRON_RUN_AS_NODE|ELECTRON_RENDERER_URL|NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|SSLKEYLOGFILE|https?_proxy|all_proxy|no_proxy)$/i.test(key)) delete env[key]
   }
   const port = await freePort()
-  require('./configure-test-keychain.cjs')(root, env)
   const profileFlag = `--user-data-dir=${directories.userData}`
   const report = {
     passed: false, version: manifest.version, platform: process.platform, arch: process.arch,
     productionProfileUsed: false, providerRequestsSubmitted: false, checks: [],
   }
-  let app, client
+  let app, client, cleanupKeychain = () => {}
   try {
+    cleanupKeychain = require('./configure-test-keychain.cjs')(root, env)
     app = childProcess(executable, [profileFlag, '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`], env, root)
     let target
     const deadline = Date.now() + 45000
@@ -237,6 +237,8 @@ async function main() {
       report.stderrDiagnostic = diagnosticLines(app?.stderr || '')
       if (app?.result?.error) report.launchError = sanitize(app.result.error)
     }
+    try { cleanupKeychain() }
+    catch { report.passed = false; report.keychainCleanupError = 'The fixture native keychain could not be deleted' }
     fs.mkdirSync(path.dirname(reportFile), { recursive: true })
     fs.writeFileSync(reportFile, `${JSON.stringify(report, null, 2)}\n`)
     console.log(JSON.stringify(report, null, 2))

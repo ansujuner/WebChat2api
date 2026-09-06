@@ -58,9 +58,9 @@ async function main() {
     if (/^(ELECTRON_RUN_AS_NODE|ELECTRON_RENDERER_URL|NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|SSLKEYLOGFILE)$/i.test(key)) delete env[key]
   }
   const executable = require(require.resolve('electron', { paths: [source] }))
-  require('./configure-test-keychain.cjs')(source, env)
   assert.ok(inside(fs.realpathSync(executable), source), 'Electron executable must belong to the source install')
   let child, timer, sampleTimer, sampler, timedOut = false, stderr = '', nativeDiagnostic = ''
+  let cleanupKeychain = () => {}, observedHarnessWritten = false
   const killGroup = () => {
     if (!child?.pid) return
     try { process.kill(-child.pid, 'SIGKILL') } catch (error) { if (error.code !== 'ESRCH') throw error }
@@ -69,7 +69,9 @@ async function main() {
   const output = path.join(source, 'artifacts/runtime-app-smoke.json')
   const bound = text => text.slice(-128 * 1024)
   try {
+    cleanupKeychain = require('./configure-test-keychain.cjs')(source, env)
     fs.writeFileSync(harness, observedText)
+    observedHarnessWritten = true
     child = spawn(executable, [fixture], { cwd: source, env, shell: false, detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
     child.stderr.on('data', data => { stderr = bound(stderr + data.toString('utf8')) })
     timer = setTimeout(() => {
@@ -113,14 +115,18 @@ async function main() {
     console.log(JSON.stringify(report, null, 2))
     process.exitCode = passed ? 0 : 1
   } finally {
-    clearTimeout(timer)
-    clearTimeout(sampleTimer)
-    if (sampler && sampler.exitCode === null && sampler.signalCode === null) sampler.kill('SIGKILL')
-    killGroup()
-    // This edits only fixture observability; restore the source bytes before packaging.
-    assert.equal(fs.readFileSync(harness, 'utf8'), observedText, 'Fixture changed concurrently; refusing to replace unrelated edits')
-    fs.writeFileSync(harness, original)
-    assert.ok(fs.readFileSync(harness).equals(original), 'Released fixture was not restored byte-for-byte')
+    try {
+      clearTimeout(timer)
+      clearTimeout(sampleTimer)
+      if (sampler && sampler.exitCode === null && sampler.signalCode === null) sampler.kill('SIGKILL')
+      killGroup()
+      // This edits only fixture observability; restore source before packaging.
+      if (observedHarnessWritten) {
+        assert.equal(fs.readFileSync(harness, 'utf8'), observedText, 'Fixture changed concurrently; refusing to replace unrelated edits')
+        fs.writeFileSync(harness, original)
+        assert.ok(fs.readFileSync(harness).equals(original), 'Released fixture was not restored byte-for-byte')
+      }
+    } finally { cleanupKeychain() }
   }
 }
 
