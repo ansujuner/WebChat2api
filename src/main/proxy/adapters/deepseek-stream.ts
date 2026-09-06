@@ -10,8 +10,6 @@ import { ToolStreamParser } from '../toolCalling/ToolStreamParser.ts'
 import type { ToolCallingPlan } from '../toolCalling/types.ts'
 import type { ProviderConversationState } from '../conversationTypes'
 import { parseDeepSeekRestriction, DeepSeekAccountRestrictionError, type DeepSeekRestriction } from './deepseek-restrictions.ts'
-
-const MODEL_NAME = 'deepseek-chat'
 const SEARCH_CONTROL_MARKER_PATTERN = /^(SEARCH|WEB_SEARCH|SEARCHING)(?:\s+|$)/i
 
 function stripSearchControlMarker(content: string, enabled: boolean): string {
@@ -43,7 +41,6 @@ export class DeepSeekStreamHandler {
   private currentPath: string = ''
   private searchResults: any[] = []
   private thinkingStarted: boolean = false
-  private accumulatedTokenUsage: number = 2
   private created: number
   private onEnd?: () => void
   private toolStreamParser?: ToolStreamParser
@@ -303,8 +300,6 @@ export class DeepSeekStreamHandler {
   ): void {
     this.observeConversation(chunk)
 
-    const previousPath = this.currentPath
-
     if (chunk.v && typeof chunk.v === 'object' && chunk.v.response) {
       const isThinkingNow = chunk.v.response.thinking_enabled
       this.currentPath = isThinkingNow ? 'thinking' : 'content'
@@ -355,14 +350,6 @@ export class DeepSeekStreamHandler {
     }
 
     if (chunk.p === 'response/search_status') return
-
-    if (chunk.p === 'response' && Array.isArray(chunk.v)) {
-      chunk.v.forEach((e: any) => {
-        if (e.p === 'accumulated_token_usage' && typeof e.v === 'number') {
-          this.accumulatedTokenUsage = e.v
-        }
-      })
-    }
 
     if (
       (chunk.p === 'response/search_results' || /^response\/fragments\/-?\d+\/results$/.test(chunk.p || ''))
@@ -626,7 +613,7 @@ export class DeepSeekStreamHandler {
 
             if (typeof parsed.v === 'object' && Array.isArray(parsed.v)) {
               parsed.v.forEach((e: any) => {
-                if (e.accumulated_token_usage && typeof e.v === 'number') {
+                if (parsed.p === 'response' && e.p === 'accumulated_token_usage' && Number.isSafeInteger(e.v) && e.v >= 0) {
                   accumulatedTokenUsage = e.v
                 }
                 if (Array.isArray(e.v)) {

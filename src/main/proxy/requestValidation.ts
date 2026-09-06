@@ -1,3 +1,5 @@
+import { normalizeToolChoicePolicy, ToolChoicePolicyError } from './toolCalling/toolChoicePolicy.ts'
+
 export interface RequestValidationError { message: string; param: string }
 
 const record = (value: unknown): value is Record<string, any> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -33,6 +35,13 @@ export function validateChatRequestOptions(body: Record<string, any>): RequestVa
   }
   if (body.tool_choice !== undefined && body.tool_choice !== null && !['auto', 'none', 'required'].includes(body.tool_choice)) {
     if (!record(body.tool_choice) || body.tool_choice.type !== 'function' || !record(body.tool_choice.function) || !nonempty(body.tool_choice.function.name)) return fail('tool_choice', 'must select auto, none, required or a named function')
+  }
+  try {
+    normalizeToolChoicePolicy(body.tool_choice ?? undefined,
+      (body.tools ?? []).map((tool: { function: { name: string } }) => ({ name: tool.function.name })))
+  } catch (error) {
+    if (error instanceof ToolChoicePolicyError) return { param: 'tool_choice', message: error.message }
+    throw error
   }
   for (const [index, message] of body.messages.entries()) {
     if (message.role === 'tool' && !nonempty(message.tool_call_id)) return fail(`messages[${index}].tool_call_id`, 'is required for a tool result')

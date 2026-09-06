@@ -45,7 +45,6 @@ const FAKE_HEADERS = {
 const SIGN_SECRET = '8a1317a7468aa3ad86e997d08f3f31cb'
 
 export class GLMAdapter extends BaseOAuthAdapter {
-  private pendingResolve: ((result: OAuthResult) => void) | null = null
 
   constructor(config: AdapterConfig) {
     super({

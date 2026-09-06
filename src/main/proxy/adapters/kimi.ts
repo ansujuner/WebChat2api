@@ -112,13 +112,9 @@ function checkResult(result: AxiosResponse, refreshToken: string): any {
 }
 
 export class KimiAdapter {
-  private provider: Provider
-  private account: Account
   private token: string
 
-  constructor(provider: Provider, account: Account) {
-    this.provider = provider
-    this.account = account
+  constructor(_provider: Provider, account: Account) {
     this.token = account.credentials.token || account.credentials.refreshToken || ''
   }
 
@@ -404,7 +400,6 @@ const STAGE_NAME_THINKING = 'STAGE_NAME_THINKING'
 export class KimiStreamHandler {
   private model: string
   private conversationId: string
-  private enableThinking: boolean
   private toolStreamParser?: ToolStreamParser
   private toolCallingPlan?: ToolCallingPlan
   private realChatId: string | null = null
@@ -443,10 +438,9 @@ export class KimiStreamHandler {
     }
   }
 
-  constructor(model: string, conversationId: string, enableThinking: boolean = false, toolCallingPlan?: ToolCallingPlan) {
+  constructor(model: string, conversationId: string, _enableThinking: boolean = false, toolCallingPlan?: ToolCallingPlan) {
     this.model = model
     this.conversationId = conversationId
-    this.enableThinking = enableThinking
     this.toolCallingPlan = toolCallingPlan
     this.toolStreamParser = toolCallingPlan?.shouldParseResponse ? new ToolStreamParser(toolCallingPlan) : undefined
   }
@@ -552,7 +546,6 @@ export class KimiStreamHandler {
     // gRPC-Web frame format: 1 byte flag + 4 bytes length (big-endian) + payload
     while (offset + 5 <= buffer.length) {
       if (this.isDone || this.hasError) break
-      const flag = buffer.readUInt8(offset)
       const length = buffer.readUInt32BE(offset + 1)
 
       if (offset + 5 + length > buffer.length) {
@@ -739,7 +732,6 @@ export class KimiStreamHandler {
         let offset = 0
         while (offset + 5 <= buffer.length) {
           if (this.isDone || this.hasError) break
-          const flag = buffer.readUInt8(offset)
           const length = buffer.readUInt32BE(offset + 1)
 
           if (offset + 5 + length > buffer.length) {

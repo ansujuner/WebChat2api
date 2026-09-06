@@ -48,3 +48,15 @@ test('removeSourceArtifacts deletes only detected sibling artifacts', (t) => {
   assert.equal(existsSync(generated), false)
   assert.equal(existsSync(standalone), true)
 })
+
+test('source scan ignores isolated audit and generated-report trees but still checks application source', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'source-artifacts-scopes-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  for (const directory of ['.audit-cache', 'artifacts', 'coverage', 'src/main']) {
+    const target = join(root, directory)
+    mkdirSync(target, { recursive: true })
+    writeFileSync(join(target, 'fixture.ts'), 'export const value = 1\n')
+    writeFileSync(join(target, 'fixture.js'), 'exports.value = 1\n')
+  }
+  assert.deepEqual(findSourceArtifacts(root), ['src/main/fixture.js'])
+})

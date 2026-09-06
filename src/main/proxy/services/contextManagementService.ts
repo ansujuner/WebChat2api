@@ -123,22 +123,6 @@ function estimateTokens(content: string | ChatMessage['content']): number {
 }
 
 /**
- * Get message content as string
- */
-function getMessageContent(message: ChatMessage): string {
-  if (typeof message.content === 'string') {
-    return message.content
-  }
-  if (Array.isArray(message.content)) {
-    return message.content
-      .filter(part => part.type === 'text' && part.text)
-      .map(part => part.text)
-      .join('\n')
-  }
-  return ''
-}
-
-/**
  * Sliding Window Strategy
  * Keeps the most recent N messages, always preserving system messages
  */

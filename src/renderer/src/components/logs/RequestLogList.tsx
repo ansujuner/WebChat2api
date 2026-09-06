@@ -15,6 +15,7 @@ import {
 import { RequestLogDetail } from './RequestLogDetail'
 import { RequestLogStats } from './RequestLogStats'
 import { Trash2 } from 'lucide-react'
+import { useToast } from '@/hooks/use-toast'
 
 interface RequestLogEntry {
   id: string
@@ -78,21 +79,38 @@ function formatLatency(ms: number) {
 
 export function RequestLogList() {
   const { t } = useTranslation()
+  const { toast } = useToast()
   const [logs, setLogs] = useState<RequestLogEntry[]>([])
   const [stats, setStats] = useState<RequestLogStatsData | null>(null)
   const [selectedLog, setSelectedLog] = useState<RequestLogEntry | null>(null)
   const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'error'>('all')
   const [isLoading, setIsLoading] = useState(true)
   const [showClearDialog, setShowClearDialog] = useState(false)
+  const [isClearing, setIsClearing] = useState(false)
+  const clearing = useRef(false)
+  const mounted = useRef(true)
+  const logsVersion = useRef(0)
+  const statsVersion = useRef(0)
   const logsRef = useRef<RequestLogEntry[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState({ width: 800, height: 400 })
 
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      logsVersion.current++
+      statsVersion.current++
+    }
+  }, [])
+
   const fetchLogs = useCallback(async () => {
+    if (clearing.current) return
+    const version = ++logsVersion.current
     try {
       const filter = statusFilter === 'all' ? {} : { status: statusFilter }
       const result = await window.electronAPI?.requestLogs?.get({ ...filter, limit: 200 })
-      if (result) {
+      if (result && mounted.current && version === logsVersion.current) {
         if (JSON.stringify(result) !== JSON.stringify(logsRef.current)) {
           logsRef.current = result
           setLogs(result)
@@ -104,9 +122,10 @@ export function RequestLogList() {
   }, [statusFilter])
 
   const fetchStats = useCallback(async () => {
+    const version = ++statsVersion.current
     try {
       const result = await window.electronAPI?.requestLogs?.getStats()
-      if (result) {
+      if (result && mounted.current && version === statsVersion.current) {
         setStats(result)
       }
     } catch (error) {
@@ -115,12 +134,17 @@ export function RequestLogList() {
   }, [])
 
   const refreshLogs = useCallback(async () => {
+    if (clearing.current) return
     await Promise.all([fetchLogs(), fetchStats()])
   }, [fetchLogs, fetchStats])
 
   useEffect(() => {
+    let active = true
     setIsLoading(true)
-    refreshLogs().finally(() => setIsLoading(false))
+    refreshLogs().finally(() => {
+      if (active && mounted.current) setIsLoading(false)
+    })
+    return () => { active = false }
   }, [refreshLogs])
 
   useEffect(() => {
@@ -147,11 +171,32 @@ export function RequestLogList() {
   }, [logs.length])
 
   const handleClearLogs = async () => {
-    await window.electronAPI?.requestLogs?.clear()
-    logsRef.current = []
-    setLogs([])
-    fetchStats()
-    setShowClearDialog(false)
+    if (clearing.current) return
+    clearing.current = true
+    setIsClearing(true)
+    // Retire reads started before this mutation so they cannot restore deleted rows.
+    logsVersion.current++
+    statsVersion.current++
+    try {
+      const api = window.electronAPI?.requestLogs
+      if (!api?.clear) throw new Error('Request log IPC is unavailable')
+      await api.clear()
+      if (!mounted.current) return
+      logsRef.current = []
+      setLogs([])
+      setSelectedLog(null)
+      setIsLoading(false)
+      setShowClearDialog(false)
+      await fetchStats()
+    } catch (error) {
+      console.error('Failed to clear request logs:', error)
+      if (mounted.current) {
+        toast({ variant: 'destructive', title: t('logs.clearFailed'), description: t('logs.cannotClearLogs') })
+      }
+    } finally {
+      clearing.current = false
+      if (mounted.current) setIsClearing(false)
+    }
   }
 
   const handleSelectLog = useCallback((log: RequestLogEntry) => {
@@ -225,10 +270,10 @@ export function RequestLogList() {
           </Select>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={refreshLogs}>
+          <Button variant="outline" size="sm" onClick={refreshLogs} disabled={isClearing}>
             {t('dashboard.refresh')}
           </Button>
-          <Button variant="destructive" size="sm" onClick={() => setShowClearDialog(true)}>
+          <Button variant="destructive" size="sm" onClick={() => setShowClearDialog(true)} disabled={isClearing}>
             {t('logs.clearLogs')}
           </Button>
         </div>
@@ -264,7 +309,7 @@ export function RequestLogList() {
         <RequestLogDetail log={selectedLog} onClose={() => setSelectedLog(null)} />
       )}
 
-      <Dialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+      <Dialog open={showClearDialog} onOpenChange={open => { if (!clearing.current) setShowClearDialog(open) }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -278,10 +323,10 @@ export function RequestLogList() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowClearDialog(false)}>
+            <Button variant="outline" onClick={() => setShowClearDialog(false)} disabled={isClearing}>
               {t('common.cancel')}
             </Button>
-            <Button variant="destructive" onClick={handleClearLogs}>
+            <Button variant="destructive" onClick={handleClearLogs} disabled={isClearing}>
               {t('logs.clearLogs')}
             </Button>
           </DialogFooter>

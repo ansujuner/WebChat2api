@@ -7,7 +7,6 @@ import axios from 'axios'
 import { BaseOAuthAdapter } from './base'
 import {
   OAuthResult,
-  OAuthOptions,
   TokenValidationResult,
   CredentialInfo,
   AdapterConfig,

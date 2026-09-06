@@ -20,6 +20,74 @@ function countMatches(value: string, pattern: RegExp): number {
   return value.match(pattern)?.length ?? 0
 }
 
+for (const total of [0, 42]) {
+  test(`DeepSeek non-stream preserves accumulated token usage ${total} from response patches`, async () => {
+    const handler = new DeepSeekStreamHandler('deepseek-v4-flash', 'usage-fixture')
+    const response = await handler.handleNonStream(sse([
+      { p: 'response', v: [{ p: 'accumulated_token_usage', v: total }] },
+    ]))
+    assert.equal(response.usage.total_tokens, total)
+  })
+}
+
+for (const invalid of [-1, 1.5, '42', null]) {
+  test(`DeepSeek non-stream ignores invalid accumulated token usage ${JSON.stringify(invalid)}`, async () => {
+    const handler = new DeepSeekStreamHandler('deepseek-v4-flash', 'usage-fixture')
+    const response = await handler.handleNonStream(sse([
+      { p: 'response', v: [{ p: 'accumulated_token_usage', v: invalid }] },
+    ]))
+    assert.equal(response.usage.total_tokens, 2)
+  })
+}
+
+// These fixtures use the existing response-patch protocol: p='response' carries
+// relative child paths (the old streaming branch already recognized this exact
+// accumulated_token_usage path). Values/body are local fixtures, not live traffic.
+for (const total of [0, 42]) {
+  const usage = { p: 'response', o: 'BATCH', v: [{ p: 'accumulated_token_usage', v: total }] }
+  const answer = { p: 'response/fragments', o: 'APPEND', v: [{ type: 'RESPONSE', content: '测试回复。' }] }
+  const terminal = { p: 'response/status', v: 'FINISHED' }
+  const scenarios = {
+    'before content': [usage, answer, terminal],
+    'after content before status': [answer, usage, terminal],
+    'after status before DONE': [answer, terminal, usage],
+    'same batch before status': [answer, { p: 'response', o: 'BATCH', v: [usage.v[0], { p: 'status', v: 'FINISHED' }] }],
+    'same batch after status': [answer, { p: 'response', o: 'BATCH', v: [{ p: 'status', v: 'FINISHED' }, usage.v[0]] }],
+  }
+  for (const [placement, events] of Object.entries(scenarios)) {
+    test(`DeepSeek non-stream usage ${total} ${placement} preserves content across transport splits`, async () => {
+      const input = Buffer.from(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n')
+      const chunks = Array.from({ length: Math.ceil(input.length / 7) }, (_, index) => input.subarray(index * 7, index * 7 + 7))
+      const handler = new DeepSeekStreamHandler('deepseek-v4-flash', 'usage-fixture')
+      const response = await handler.handleNonStream(Readable.from(chunks))
+      assert.equal(response.choices[0].message.content, '测试回复。')
+      assert.equal(response.choices[0].finish_reason, 'stop')
+      assert.equal(response.usage.total_tokens, total)
+    })
+  }
+}
+
+test('DeepSeek non-stream keeps the latest valid accumulated usage rather than summing cumulative frames', async () => {
+  const handler = new DeepSeekStreamHandler('deepseek-v4-flash', 'usage-fixture')
+  const response = await handler.handleNonStream(sse([
+    { p: 'response', v: [{ p: 'accumulated_token_usage', v: 10 }] },
+    { p: 'response/fragments', v: [{ type: 'RESPONSE', content: '完成。' }] },
+    { p: 'response', v: [{ p: 'accumulated_token_usage', v: 42 }] },
+    { p: 'response', v: [{ p: 'accumulated_token_usage', v: -1 }] },
+    { p: 'response/status', v: 'FINISHED' },
+  ]))
+  assert.equal(response.usage.total_tokens, 42)
+  assert.equal(response.choices[0].message.content, '完成。')
+})
+
+test('DeepSeek non-stream does not take usage-shaped fields from an unrelated patch path', async () => {
+  const handler = new DeepSeekStreamHandler('deepseek-v4-flash', 'usage-fixture')
+  const response = await handler.handleNonStream(sse([
+    { p: 'response/fragments', v: [{ p: 'accumulated_token_usage', v: 99 }] },
+  ]))
+  assert.equal(response.usage.total_tokens, 2)
+})
+
 test('DeepSeek stream appends citations from HAR fragment results', async () => {
   const handler = new DeepSeekStreamHandler('deepseek-v4-flash-search', 'session-1', undefined, true)
   const source = sse([

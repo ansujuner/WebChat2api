@@ -72,10 +72,6 @@ function uuid(): string {
   })
 }
 
-function timestamp(): number {
-  return Date.now()
-}
-
 export class QwenAiAdapter {
   private provider: Provider
   private account: Account

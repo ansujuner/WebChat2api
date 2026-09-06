@@ -679,12 +679,6 @@ export class ProviderChecker {
     })
   }
 
-  private static async generateGLMSign(timestamp: string, nonce: string): Promise<string> {
-    const crypto = await import('crypto')
-    const secret = '8a1317a7468aa3ad86e997d08f3f31cb'
-    return crypto.createHash('md5').update(`${timestamp}-${nonce}-${secret}`).digest('hex')
-  }
-
   static async fetchProviderModels(
     providerId: string
   ): Promise<{

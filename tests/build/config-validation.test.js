@@ -72,24 +72,34 @@ test('provider adapter public entry exports stream modules and Arena from their 
   assert.equal(module.exports.ArenaStreamHandler,arenaStream)
 })
 
-test('legacy default prompt entry loads its actual exported signature constant', () => {
-  const module = { exports: {} }, signatures = ['fixture signature']
-  const output = ts.transpileModule(readFileSync(join(root,'src/main/proxy/adapters/prompt/DefaultPromptAdapter.ts'),'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
-  const imports = {'./BasePromptAdapter':{BasePromptAdapter:class { registerVariant() {} }},'../../utils/toolParser':{},'../../constants/signatures':{GENERAL_TOOL_SIGNATURES:signatures},'../../prompt/variants':{DEFAULT_VARIANT:{},XML_VARIANT:{}}}
-  vm.runInNewContext(output,{module,exports:module.exports,require:name=>{assert.ok(imports[name],name);return imports[name]}})
-  assert.equal(module.exports.defaultPromptAdapter.detectSignatures,signatures)
-})
-
-test('shared account factory returns the current identity and usage fields', () => {
+test('production account creation initializes the current identity and usage fields', () => {
   const module = { exports: {} }
-  const output = ts.transpileModule(readFileSync(join(root,'src/main/proxy/utils/accountUtils.ts'),'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
-  vm.runInNewContext(output,{module,exports:module.exports})
-  const value = module.exports.createAccount('fixture',{}, {email:'fixture@example.test',name:'Same name',userId:'public-id'})
+  const saved = []
+  const imports = {
+    './store': { storeManager: {
+      ensureProviderExists(id) { assert.equal(id, 'fixture') },
+      getProviderById: () => ({ id: 'fixture', name: 'Fixture provider' }),
+      generateId: () => 'fixture-account',
+      addAccount: (account) => saved.push(account),
+      addLog() {},
+    } },
+    './validator': {},
+    '../../shared/accountIdentity': require('../../src/shared/accountIdentity.ts'),
+    '../providers/arenaCatalog': {},
+    '../../shared/accountAvailability': {},
+  }
+  const output = ts.transpileModule(readFileSync(join(root,'src/main/store/accounts.ts'),'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
+  vm.runInNewContext(output,{module,exports:module.exports, require: name => { assert.ok(imports[name], name); return imports[name] }})
+  const value = module.exports.AccountManager.create({ providerId: 'fixture', credentials: {},
+    email: 'fixture@example.test', name: 'Same name', nameSource: 'auto', providerUserId: 'public-id' })
   assert.equal(value.name,'fixture@example.test')
   assert.equal(value.nameSource,'auto')
   assert.equal(value.providerUserId,'public-id')
   assert.equal(value.requestCount,0)
   assert.equal(value.todayUsed,0)
   assert.equal(Object.hasOwn(value,'usageCount'),false)
-  assert.ok(module.exports.createAccount('fixture',{}).name)
+  assert.equal(saved.length, 1)
+  assert.equal(saved[0], value)
+  assert.equal(value.enabled, true)
+  assert.ok(module.exports.AccountManager.create({providerId:'fixture',credentials:{}}).name)
 })

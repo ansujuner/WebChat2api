@@ -56,7 +56,6 @@ interface StoredCookies {
 }
 
 const sessionCache = new Map<string, SessionData>()
-const cookiesCache = new Map<string, StoredCookies>()
 
 function extractTextContent(content: PerplexityMessage['content']): string {
   if (typeof content === 'string') return content
@@ -365,7 +364,6 @@ export class PerplexityAdapter {
 
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = []
-      let errorBodyRead = false
       
       request_.on('response', (response) => {
         const statusCode = response.statusCode
@@ -386,7 +384,6 @@ export class PerplexityAdapter {
         
         if (statusCode && statusCode >= 400) {
           // Error response - read full body before rejecting
-          errorBodyRead = true
           let errorBody = ''
           response.on('data', (chunk: Buffer) => {
             errorBody += chunk.toString()

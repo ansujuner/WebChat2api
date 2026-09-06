@@ -5,7 +5,7 @@
 
 import axios from 'axios'
 import type { AxiosResponse } from 'axios'
-import { PassThrough, Readable } from 'stream'
+import { Readable } from 'stream'
 import { StringDecoder } from 'node:string_decoder'
 import type { Account, Provider } from '../../store/types'
 import type { ConversationRequestOptions } from '../conversationTypes'
@@ -183,9 +183,6 @@ export function parseToolCalls(text: string): ParsedToolCall[] {
 export function hasToolCallMarker(text: string): boolean {
   return text.includes('<tool_callgt;') || text.includes('<function_calls>')
 }
-
-const CITATION_PATTERN = '(?:从)?\\(citation:\\d+\\)(?:中[：:])?'
-const CITATION_PATTERN_LOOSE = 'citation:\\d+'
 const CITATION_START = '(citation'
 
 function stripCitations(text: string): string {
@@ -328,11 +325,9 @@ export function buildMimoQuery(messages: MimoMessage[]): string {
 }
 
 export class MimoAdapter {
-  private provider: Provider
   private account: Account
 
-  constructor(provider: Provider, account: Account) {
-    this.provider = provider
+  constructor(_provider: Provider, account: Account) {
     this.account = account
   }
 
@@ -598,15 +593,10 @@ export class MimoStreamHandler {
   private model: string
   private conversationId: string
   private content: string = ''
-  private thinking: string = ''
   private usage: MimoUsage | null = null
   private dialogId: string = ''
   private toolCalls: ParsedToolCall[] = []
   private thinkingMode: 'passthrough' | 'strip' | 'separate' = 'strip'
-  private lastSentContentLen: number = 0
-  private lastSentThinkLen: number = 0
-  private toolCallBuf: string | null = null
-  private pendingText: string = ''
   private citationBuffer: { value: string } = { value: '' }
   private thinkingCitationBuffer: { value: string } = { value: '' }
   private toolStreamParser?: ToolStreamParser
@@ -913,37 +903,6 @@ export class MimoStreamHandler {
       created,
       model: this.model,
     }
-  }
-
-  private formatOpenAIToolCallChunk(
-    id: string,
-    created: number,
-    toolCalls: ParsedToolCall[]
-  ): string {
-    const chunk: any = {
-      id,
-      object: 'chat.completion.chunk',
-      created,
-      model: this.model,
-      choices: [
-        {
-          index: 0,
-          delta: {
-            tool_calls: toolCalls.map((tc, index) => ({
-              index,
-              id: tc.id,
-              type: 'function',
-              function: {
-                name: tc.name,
-                arguments: JSON.stringify(tc.arguments),
-              },
-            })),
-          },
-          finish_reason: null,
-        },
-      ],
-    }
-    return `data: ${JSON.stringify(chunk)}\n\n`
   }
 
   private formatOpenAIUsageChunk(id: string, created: number, usage: MimoUsage): string {

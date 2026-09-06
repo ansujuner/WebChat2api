@@ -157,7 +157,7 @@ export class QwenAdapter extends BaseOAuthAdapter {
         }
       }
       
-      const { success, errorCode, errorMsg, data } = response.data
+      const { success, errorCode, errorMsg } = response.data
       
       if (success === false) {
         return {

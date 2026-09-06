@@ -21,7 +21,7 @@ import { MimoAdapter, MimoStreamHandler } from './adapters/mimo'
 import { QwenAdapter, QwenStreamHandler } from './adapters/qwen'
 import { QwenAiAdapter, QwenAiStreamHandler } from './adapters/qwen-ai'
 import { ZaiAdapter, ZaiStreamHandler, ZaiUpstreamError } from './adapters/zai'
-import { MiniMaxAdapter, MiniMaxStreamHandler } from './adapters/minimax'
+import { MiniMaxAdapter } from './adapters/minimax'
 import { PerplexityAdapter } from './adapters/perplexity'
 import { PerplexityStreamHandler } from './adapters/perplexity-stream'
 import { ArenaAdapter } from './adapters/arena'
@@ -1005,7 +1005,7 @@ export class RequestForwarder {
       }
 
       const adapter = new QwenAdapter(provider, account)
-      const { response, sessionId, reqId } = await adapter.chatCompletion({
+      const { response, sessionId } = await adapter.chatCompletion({
         ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.model,
@@ -1097,7 +1097,7 @@ export class RequestForwarder {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
 
       const adapter = new QwenAiAdapter(provider, account)
-      const { response, chatId, parentId } = await adapter.chatCompletion({
+      const { response, chatId } = await adapter.chatCompletion({
         ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.model,

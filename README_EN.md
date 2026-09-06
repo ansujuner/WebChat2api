@@ -47,9 +47,9 @@ The individual page screenshots below use the Chinese UI; an [English dark-mode 
 
 ## Run from source
 
-**Download directly:** [v1.6.6 clean source ZIP](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.6/WebChat2api-1.6.6-source.zip) · [Release notes and checksums](https://github.com/ansujuner/WebChat2api/releases/tag/source-v1.6.6). This is source, not an installer; accounts, logs, dependencies, and compiled output are excluded.
+**Download directly:** [v1.6.7 clean source ZIP](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/WebChat2api-1.6.7-source.zip) · [Release notes and checksums](https://github.com/ansujuner/WebChat2api/releases/tag/source-v1.6.7). This is source, not an installer; accounts, logs, dependencies, and compiled output are excluded.
 
-Requires **Node.js 22.18+** (Node.js 24 recommended) and npm. After extracting the ZIP, run the last three commands below inside `WebChat2api-1.6.6`; Git is not required for a downloaded archive. Alternatively, clone with Git. Runtime verification has primarily been on Windows; macOS/Linux build commands in the repository do not establish runtime verification on those platforms.
+Requires **Node.js 22.18+** (Node.js 24 recommended) and npm. After extracting the ZIP, run the last three commands below inside `WebChat2api-1.6.7`; Git is not required for a downloaded archive. Alternatively, clone with Git. Runtime verification has primarily been on Windows; macOS/Linux build commands in the repository do not establish runtime verification on those platforms.
 
 ```bash
 git clone https://github.com/ansujuner/WebChat2api.git

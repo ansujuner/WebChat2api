@@ -7,6 +7,15 @@ The original copyright and **GPL-3.0-or-later** grant are retained in
 
 ## Changes from the supplied project
 
+- v1.6.7 (2026-09-07): removed 52 unused files and 105 dependency nodes while
+  preserving active providers, protocol compatibility and account migrations.
+  Fixed stale request-log responses after filter changes/clearing, connected tool
+  choice validation before provider submission, and corrected DeepSeek non-stream
+  usage accounting. Production builds now require strict no-emit type checks for
+  both processes; form-data is declared directly and remains bundled. Added
+  lifecycle, policy, usage, dependency and reachability regression tests. See
+  docs/code-cleanup-2026-09-07.md for the validation scope and remaining warnings.
+
 - Source release preparation (2026-09-07): explicitly install the pinned Electron
   runtime before native dependency preparation during `npm ci`. Electron 44's
   package does not perform that download automatically. Added installation

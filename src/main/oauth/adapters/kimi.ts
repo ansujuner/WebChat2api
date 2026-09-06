@@ -93,14 +93,6 @@ export class KimiAdapter extends BaseOAuthAdapter {
   }
 
   /**
-   * Extract session ID from JWT token
-   */
-  private extractSessionIdFromJWT(token: string): string | undefined {
-    const payload = this.parseJWT(token)
-    return payload?.ssid as string | undefined
-  }
-
-  /**
    * Extract user ID from JWT token
    */
   private extractUserIdFromJWT(token: string): string | undefined {

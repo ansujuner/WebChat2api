@@ -11,10 +11,9 @@ import axios, { AxiosResponse } from 'axios'
 import { resolveMiniMaxWebModel } from './providerModelOptions'
 import crypto from 'crypto'
 import { createParser, EventSourceMessage } from 'eventsource-parser'
-import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
 import type { ConversationRequestOptions } from '../conversationTypes'
-import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected, shouldInjectToolPrompt } from '../utils/tools'
+import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected } from '../utils/tools'
 import { parseToolCallsFromText } from '../utils/toolParser'
 import { 
   createToolCallState, 
@@ -194,17 +193,13 @@ function checkResult(result: AxiosResponse): any {
 }
 
 export class MiniMaxAdapter {
-  private provider: Provider
-  private account: Account
   private rawToken: string
   private jwtToken: string
   private realUserID: string
   private model: string
   private created: number
 
-  constructor(provider: Provider, account: Account) {
-    this.provider = provider
-    this.account = account
+  constructor(_provider: Provider, account: Account) {
     this.rawToken = account.credentials.token || ''
     this.model = 'MiniMax-Agent'
     this.created = unixTimestamp()
@@ -1194,7 +1189,7 @@ export class MiniMaxStreamHandler {
             const result = JSON.parse(line)
             console.log('[MiniMax] Parsed JSON:', result)
 
-            const { type, base_resp, statusInfo, data: _data, chat_id, msg_id } = result
+            const { type, base_resp, statusInfo, data: _data, chat_id } = result
 
             // Handle initial response with chat_id
             if (chat_id && !this.chatId) {

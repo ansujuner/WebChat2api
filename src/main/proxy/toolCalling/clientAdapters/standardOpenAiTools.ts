@@ -1,5 +1,6 @@
 import type { ChatCompletionRequest, ChatCompletionTool } from '../../types.ts'
 import type { NormalizedToolDefinition } from '../types.ts'
+import { normalizeToolChoicePolicy } from '../toolChoicePolicy.ts'
 import type { NormalizedClientToolRequest, NormalizedToolChoice, ToolClientAdapter } from './types.ts'
 
 export function normalizeOpenAiTools(
@@ -18,16 +19,10 @@ export function normalizeOpenAiTools(
 
 export function normalizeToolChoice(
   request: ChatCompletionRequest,
-  toolNames: Set<string>,
+  tools: NormalizedToolDefinition[],
 ): NormalizedToolChoice {
-  const choice = request.tool_choice
-  if (choice === 'none') return { mode: 'none' }
-  if (choice === 'required') return { mode: 'required' }
-  if (choice && typeof choice === 'object' && choice.type === 'function') {
-    return { mode: 'forced', forcedName: choice.function.name }
-  }
-  if (toolNames.size === 1) return { mode: 'auto' }
-  return { mode: 'auto' }
+  const { mode, forcedName } = normalizeToolChoicePolicy(request.tool_choice ?? undefined, tools)
+  return forcedName === undefined ? { mode } : { mode, forcedName }
 }
 
 export const standardOpenAiToolsAdapter: ToolClientAdapter = {
@@ -35,7 +30,7 @@ export const standardOpenAiToolsAdapter: ToolClientAdapter = {
   displayName: 'Standard OpenAI Tools',
   normalizeRequest(request): NormalizedClientToolRequest {
     const tools = normalizeOpenAiTools(request.tools, 'openai')
-    const toolChoice = normalizeToolChoice(request, new Set(tools.map((tool) => tool.name)))
+    const toolChoice = normalizeToolChoice(request, tools)
 
     return {
       clientAdapterId: 'standard-openai-tools',

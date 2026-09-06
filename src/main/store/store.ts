@@ -4,7 +4,7 @@
  * Uses Electron's safeStorage API for sensitive data encryption
  */
 
-import { app, safeStorage, BrowserWindow } from 'electron'
+import { safeStorage, BrowserWindow } from 'electron'
 import { homedir } from 'os'
 import { join } from 'path'
 import {
@@ -22,7 +22,6 @@ import {
   DEFAULT_SESSION_CONFIG,
   ChatMessage,
   RequestLogEntry,
-  RequestLogConfig,
   PersistentStatistics,
   DailyStatistics,
   DEFAULT_STATISTICS,

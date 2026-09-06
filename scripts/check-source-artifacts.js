@@ -3,12 +3,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-const DEFAULT_SCAN_ROOTS = [
-  '.',
-  'src/main',
-  'src/preload',
-  'src/shared',
-]
+const DEFAULT_SCAN_ROOTS = ['.']
 
 const SKIP_DIRS = new Set([
   '.git',
@@ -16,6 +11,9 @@ const SKIP_DIRS = new Set([
   'out',
   'dist',
   'backup',
+  '.audit-cache',
+  'artifacts',
+  'coverage',
   'src/renderer/next-app',
 ])
 

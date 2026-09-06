@@ -8,23 +8,14 @@ import axios, { AxiosResponse } from 'axios'
 import { PassThrough } from 'stream'
 import { createGunzip, createInflate, createBrotliDecompress } from 'zlib'
 import * as ZstdCodec from 'zstd-codec'
-import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
-import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
-import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected, shouldInjectToolPrompt } from '../utils/tools'
+import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected } from '../utils/tools'
 import { parseToolCallsFromText } from '../utils/toolParser'
 import { createBaseChunk } from '../utils/streamToolHandler'
 import { getProviderToolProfile } from '../toolCalling/providerProfiles'
 import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
 import type { ToolCallingPlan } from '../toolCalling/types'
 import type { ConversationRequestOptions, ProviderConversationState } from '../conversationTypes'
-
-/**
- * Check if content contains tool calls (both bracket and XML formats)
- */
-function hasToolCalls(content: string): boolean {
-  return content.includes('[function_calls]') || hasToolUse(content)
-}
 
 const QWEN_API_BASE = 'https://chat2.qianwen.com'
 const QWEN_CHAT2_API_BASE = 'https://chat2-api.qianwen.com'
@@ -502,7 +493,6 @@ export class QwenStreamHandler {
   private content: string = ''
   private responseId: string = ''
   private stopSent: boolean = false
-  private toolCallsSent: boolean = false
   private hasError: boolean = false
   private toolStreamParser?: ToolStreamParser
   private toolCallingPlan?: ToolCallingPlan
@@ -536,59 +526,6 @@ export class QwenStreamHandler {
     }
     if (this.sessionId && this.responseId) {
       this.onConversation?.({ sessionId: this.sessionId, parentMessageId: this.responseId })
-    }
-  }
-
-  private sendToolCalls(transStream: PassThrough): void {
-    if (this.toolCallsSent) return
-    
-    // Use the new parser that supports both bracket and XML formats
-    const { toolCalls } = parseToolCallsFromText(this.content, 'default')
-    
-    if (toolCalls && toolCalls.length > 0) {
-      this.toolCallsSent = true
-      
-      // Send tool_calls delta
-      for (let i = 0; i < toolCalls.length; i++) {
-        const tc = toolCalls[i]
-        transStream.write(
-          `data: ${JSON.stringify({
-            id: this.responseId || this.sessionId,
-            model: this.model,
-            object: 'chat.completion.chunk',
-            choices: [{
-              index: 0,
-              delta: {
-                tool_calls: [{
-                  index: i,
-                  id: tc.id,
-                  type: 'function',
-                  function: {
-                    name: tc.function.name,
-                    arguments: tc.function.arguments,
-                  },
-                }],
-              },
-              finish_reason: null,
-            }],
-            created: this.created,
-          })}\n\n`
-        )
-      }
-      
-      // Send finish with tool_calls
-      transStream.write(
-        `data: ${JSON.stringify({
-          id: this.responseId || this.sessionId,
-          model: this.model,
-          object: 'chat.completion.chunk',
-          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
-          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          created: this.created,
-        })}\n\n`
-      )
-      transStream.end('data: [DONE]\n\n')
-      this.onEnd?.(this.sessionId)
     }
   }
 

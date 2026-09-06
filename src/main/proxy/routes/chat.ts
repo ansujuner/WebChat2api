@@ -6,7 +6,7 @@
 import Router from '@koa/router'
 import type { Context } from 'koa'
 import { Transform } from 'stream'
-import { ChatCompletionRequest, ChatCompletionResponse, ProxyContext } from '../types'
+import { ChatCompletionRequest, ProxyContext } from '../types'
 import { loadBalancer } from '../loadbalancer'
 import { requestForwarder } from '../forwarder'
 import { streamHandler } from '../stream'
@@ -22,7 +22,6 @@ import { recordAccountSuccess } from '../requestAccounting'
 import { 
   isAnthropicToolFormat,
   transformResponseToAnthropic,
-  transformChunkToAnthropic
 } from '../utils/toolFormatConverter'
 
 const router = new Router({ prefix: '/v1/chat' })

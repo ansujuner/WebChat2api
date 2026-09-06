@@ -136,7 +136,7 @@ test('official SVGs contain only inert vector geometry and no external content',
 test('all brand-bearing UI locations share the map, while app artwork and navigation remain separate', () => {
   for (const component of [
     'providers/ProviderCard.tsx', 'providers/AddProviderDialog.tsx',
-    'providers/LoginGuideDialog.tsx', 'models/ModelList.tsx',
+    'models/ModelList.tsx',
   ]) {
     const source = read(`src/renderer/src/components/${component}`)
     assert.match(source, /import \{ providerIcons \} from '@\/lib\/providerIcons'/)

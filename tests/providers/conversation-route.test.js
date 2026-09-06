@@ -556,3 +556,24 @@ test('streaming n>1 is rejected before any account selection or provider submiss
     assert.equal(f.calls.length, 0)
   }
 })
+
+test('impossible required or forced tool choices return 400 before account selection and submission', async t => {
+  for (const custom of [true, false]) {
+    const f = await setup(t, { custom })
+    for (const stream of [true, false]) {
+      for (const options of [
+        { tool_choice: 'required' },
+        { tool_choice: 'required', tools: [] },
+        { tool_choice: 'required', tools: null },
+        { tool_choice: { type: 'function', function: { name: 'missing' } },
+          tools: [{ type: 'function', function: { name: 'declared' } }] },
+      ]) {
+        const response = await f.post({ model: 'fixture-model', messages: [user('hello')], stream, ...options })
+        assert.equal(response.status, 400)
+        assert.equal((await response.json()).error.param, 'tool_choice')
+      }
+    }
+    assert.equal(f.selections.length, 0)
+    assert.equal(f.calls.length, 0)
+  }
+})

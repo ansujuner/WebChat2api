@@ -21,7 +21,7 @@ export class ToolChoicePolicyError extends Error {
 
 export function normalizeToolChoicePolicy(
   toolChoice: ChatCompletionToolChoice | undefined,
-  tools: NormalizedToolDefinition[],
+  tools: ReadonlyArray<Pick<NormalizedToolDefinition, 'name'>>,
 ): NormalizedToolChoicePolicy {
   const allToolNames = new Set(tools.map((tool) => tool.name))
 

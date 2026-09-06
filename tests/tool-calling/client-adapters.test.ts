@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import { getToolClientAdapter } from '../../src/main/proxy/toolCalling/clientAdapters/index.ts'
 import type { ChatCompletionRequest } from '../../src/main/proxy/types.ts'
+import { ToolChoicePolicyError } from '../../src/main/proxy/toolCalling/toolChoicePolicy.ts'
 
 function request(overrides: Partial<ChatCompletionRequest> = {}): ChatCompletionRequest {
   return {
@@ -63,3 +64,17 @@ test('unknown adapter falls back to standard adapter metadata and records diagno
   assert.equal(result.diagnostics.requestedClientAdapterId, 'unknown-client')
   assert.equal(result.diagnostics.fallbackClientAdapterId, 'standard-openai-tools')
 })
+
+for (const id of ['standard-openai-tools', 'cherry-studio-mcp']) {
+  test(`${id} rejects required tools and undeclared forced choices instead of silently disabling tools`, () => {
+    const adapter = getToolClientAdapter(id)
+    for (const tools of [undefined, []]) {
+      assert.throws(() => adapter.normalizeRequest(request({ tools, tool_choice: 'required' })),
+        (error) => error instanceof ToolChoicePolicyError && error.code === 'tool_choice_required_without_tools')
+    }
+    assert.throws(() => adapter.normalizeRequest(request({
+      tool_choice: { type: 'function', function: { name: 'not-declared' } },
+    })), (error) => error instanceof ToolChoicePolicyError && error.code === 'tool_choice_forced_tool_not_found')
+    assert.equal(adapter.normalizeRequest(request({ tool_choice: 'required' })).toolChoice.mode, 'required')
+  })
+}

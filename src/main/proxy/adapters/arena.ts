@@ -38,7 +38,7 @@ export function arenaConversationState(conversation: ArenaConversation): Provide
 }
 
 export class ArenaAdapter {
-  constructor(private readonly provider: Provider, private readonly account: Account) {}
+  constructor(_provider: Provider, private readonly account: Account) {}
 
   async chatCompletion(request: ArenaChatRequest): Promise<{
     response: { status: number; headers: Record<string, string>; data: Readable }

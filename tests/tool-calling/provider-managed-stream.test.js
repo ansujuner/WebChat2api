@@ -30,12 +30,11 @@ function evaluate(relative, imports = {}) {
 }
 const legacy = { parseToolCallsFromText() { assert.fail('the unscoped legacy parser must not execute when a plan is supplied') } }
 const helpers = evaluate('utils/streamToolHandler.ts', {
-  './toolParser': legacy, './toolParser/index': { createStreamState() { assert.fail('the managed path must not create legacy state') } },
+  './toolParser': legacy,
   '../toolCalling/ToolStreamParser': { ToolStreamParser },
 })
 const imports = {
   '../utils/streamToolHandler': helpers, '../utils/toolParser': legacy,
-  '../promptToolUse': { hasToolUse() { assert.fail('no second unscoped parser') }, parseToolUse() { assert.fail('no second unscoped parser') } },
   axios: { create: () => ({ request() { assert.fail('no network') } }) },
   './providerModelOptions': { resolveMiniMaxWebModel: () => 'fixture-model' },
 }

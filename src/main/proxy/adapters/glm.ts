@@ -124,11 +124,9 @@ function generateSign(): { timestamp: string; nonce: string; sign: string } {
 }
 
 export class GLMAdapter {
-  private provider: Provider
   private account: Account
 
-  constructor(provider: Provider, account: Account) {
-    this.provider = provider
+  constructor(_provider: Provider, account: Account) {
     this.account = account
   }
 
@@ -713,7 +711,7 @@ export class GLMStreamHandler {
             let fullReasoning = ''
 
             cachedParts.forEach((part) => {
-              const { content, meta_data } = part
+              const { content } = part
               if (!Array.isArray(content)) return
 
               let partText = ''
@@ -889,7 +887,7 @@ export class GLMStreamHandler {
               let fullReasoning = ''
 
               cachedParts.forEach((part) => {
-                const { content, meta_data } = part
+                const { content } = part
                 if (!Array.isArray(content)) return
 
                 let partText = ''

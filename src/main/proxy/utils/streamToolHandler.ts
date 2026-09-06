@@ -5,14 +5,12 @@
  * Strategy: Buffer content when [function_calls] marker is detected,
  * parse tool calls and emit them as tool_calls delta instead of text content
  *
- * @deprecated This module is being phased out. Use the new unified toolParser module instead.
- * Import from './toolParser/index.ts' for the latest unified parsing functionality.
+ * Provider compatibility entry point. Requests with a ToolCallingPlan delegate
+ * to ToolStreamParser; direct legacy calls retain their bracket-format behavior.
  */
 
 import { parseToolCallsFromText } from './toolParser'
 
-// Only state construction is shared; createBaseChunk remains the local legacy export.
-import { createStreamState } from './toolParser/index'
 import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
 import type { ToolCallingPlan } from '../toolCalling/types'
 
@@ -21,12 +19,8 @@ import type { ToolCallingPlan } from '../toolCalling/types'
 // disabled plans. No schema means text, not executable model-generated tools.
 const managedParsers = new WeakMap<ToolCallState, ToolStreamParser | null>()
 
-// Re-export StreamState type for backward compatibility
-export type { StreamState } from './toolParser/index'
-
 /**
- * Tool call state for backward compatibility
- * @deprecated Use StreamState from './toolParser/index.ts' instead
+ * Per-response compatibility state. Never share it across requests.
  */
 export interface ToolCallState {
   contentBuffer: string
@@ -37,7 +31,6 @@ export interface ToolCallState {
 
 /**
  * Create tool call state
- * @deprecated Use createStreamState from './toolParser/index.ts' instead
  */
 export function createToolCallState(plan?: ToolCallingPlan): ToolCallState {
   if (plan) {
@@ -50,13 +43,17 @@ export function createToolCallState(plan?: ToolCallingPlan): ToolCallState {
     managedParsers.set(state, parser)
     return state
   }
-  return createStreamState()
+  return {
+    contentBuffer: '',
+    isBufferingToolCall: false,
+    toolCallIndex: 0,
+    hasEmittedToolCall: false,
+  }
 }
 
 /**
  * Process streaming content and detect/parse tool calls
  * Returns the chunks that should be sent to the client
- * @deprecated Use parseToolCallsStream from './toolParser/index.ts' instead
  */
 export function processStreamContent(
   content: string,
@@ -161,7 +158,7 @@ export function processStreamContent(
       return { chunks: result, shouldFlush: true }
     }
 
-    const { content: cleanContent, toolCalls } = parseToolCallsFromText(state.contentBuffer, modelType)
+    const { toolCalls } = parseToolCallsFromText(state.contentBuffer, modelType)
 
     if (toolCalls.length > 0) {
       for (const tc of toolCalls) {
@@ -246,7 +243,6 @@ export function processStreamContent(
 
 /**
  * Flush any remaining content in the buffer at the end of stream
- * @deprecated Use flushToolCallBuffer from './toolParser/index.ts' instead
  */
 export function flushToolCallBuffer(
   state: ToolCallState,

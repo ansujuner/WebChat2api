@@ -4,7 +4,7 @@
  */
 
 import { storeManager } from '../store/store'
-import { SessionRecord, SessionConfig, ChatMessage, DEFAULT_SESSION_CONFIG } from '../store/types'
+import { SessionRecord, SessionConfig, ChatMessage } from '../store/types'
 
 export interface CreateSessionOptions {
   providerId: string

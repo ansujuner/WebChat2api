@@ -47,9 +47,9 @@ WebChat2api 是基于 **Chat2API** 维护的 Electron 桌面应用：集中管�
 
 ## 从源码开始
 
-**直接下载：** [v1.6.6 干净源码 ZIP](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.6/WebChat2api-1.6.6-source.zip) · [发布说明与校验文件](https://github.com/ansujuner/WebChat2api/releases/tag/source-v1.6.6)。这是源码包，不是安装程序；不含账号、日志、依赖或编译产物。
+**直接下载：** [v1.6.7 干净源码 ZIP](https://github.com/ansujuner/WebChat2api/releases/download/source-v1.6.7/WebChat2api-1.6.7-source.zip) · [发布说明与校验文件](https://github.com/ansujuner/WebChat2api/releases/tag/source-v1.6.7)。这是源码包，不是安装程序；不含账号、日志、依赖或编译产物。
 
-需要 **Node.js 22.18+**（推荐 Node.js 24）和 npm。下载 ZIP 后解压，在 `WebChat2api-1.6.6` 目录执行下列后三条命令即可，不需要 Git；也可以用 Git 克隆。已有运行验证以 Windows 为主；仓库中的 macOS/Linux 构建命令不等于已完成对应平台的运行验证。
+需要 **Node.js 22.18+**（推荐 Node.js 24）和 npm。下载 ZIP 后解压，在 `WebChat2api-1.6.7` 目录执行下列后三条命令即可，不需要 Git；也可以用 Git 克隆。已有运行验证以 Windows 为主；仓库中的 macOS/Linux 构建命令不等于已完成对应平台的运行验证。
 
 ```bash
 git clone https://github.com/ansujuner/WebChat2api.git

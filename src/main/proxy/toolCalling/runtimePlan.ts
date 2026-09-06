@@ -2,6 +2,7 @@ import type { ToolCallingConfig } from '../../../shared/toolCalling.ts'
 import type { NormalizedClientToolRequest } from './clientAdapters/types.ts'
 import { getProviderToolProfile } from './providerProfiles.ts'
 import type { ToolCallingPlan } from './types.ts'
+import { normalizeToolChoicePolicy } from './toolChoicePolicy.ts'
 
 export function buildToolCallingRuntimePlan(input: {
   requestId?: string
@@ -13,14 +14,13 @@ export function buildToolCallingRuntimePlan(input: {
 }): ToolCallingPlan {
   const profile = getProviderToolProfile(input.providerId)
   const tools = input.clientRequest.tools
-  const toolNames = new Set(tools.map((tool) => tool.name))
-  const forcedName = input.clientRequest.toolChoice.forcedName
-
-  if (input.clientRequest.toolChoice.mode === 'forced' && forcedName && !toolNames.has(forcedName)) {
-    throw new Error(`Forced tool ${forcedName} is not declared`)
-  }
-
-  const allowedToolNames = forcedName ? new Set([forcedName]) : toolNames
+  const choice = input.clientRequest.toolChoice
+  const { forcedName, allowedToolNames } = normalizeToolChoicePolicy(
+    choice.mode === 'forced'
+      ? { type: 'function', function: { name: choice.forcedName ?? '' } }
+      : choice.mode,
+    tools,
+  )
   const allowedTools = forcedName ? tools.filter((tool) => tool.name === forcedName) : tools
   const disabledReason = getDisabledReason(
     input.config,

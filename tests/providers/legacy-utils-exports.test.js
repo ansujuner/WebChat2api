@@ -32,26 +32,18 @@ function fixture() {
   return { load }
 }
 
-test('legacy utils barrel resolves shared symbols to unified implementations and preserves unique legacy helpers', () => {
-  const f = fixture(), barrel = f.load(path.join(utils, 'index.ts'))
-  const unified = f.load(path.join(utils, 'toolParser/index.ts')), legacy = f.load(path.join(utils, 'streamToolHandler.ts'))
-  assert.equal(barrel.flushToolCallBuffer, unified.flushToolCallBuffer)
-  assert.equal(barrel.shouldBlockOutput, unified.shouldBlockOutput)
-  assert.equal(barrel.createBaseChunk, legacy.createBaseChunk)
-  assert.equal(barrel.createToolCallState, legacy.createToolCallState)
-  assert.equal(barrel.processStreamContent, legacy.processStreamContent)
-  assert.equal(typeof barrel.toolsToSystemPrompt, 'function')
-  assert.equal(typeof barrel.parseToolCallsStream, 'function')
+test('provider compatibility helpers load without the removed parallel parser or unused barrel', () => {
+  const f = fixture(), legacy = f.load(path.join(utils, 'streamToolHandler.ts'))
+  for (const name of ['flushToolCallBuffer', 'shouldBlockOutput', 'createBaseChunk', 'createToolCallState', 'processStreamContent']) {
+    assert.equal(typeof legacy[name], 'function', name)
+  }
+  assert.equal(typeof f.load(path.join(utils, 'tools.ts')).toolsToSystemPrompt, 'function')
+  assert.equal(fs.existsSync(path.join(utils, 'toolParser/index.ts')), false)
+  assert.equal(fs.existsSync(path.join(utils, 'index.ts')), false)
 })
 
 test('adapter-used legacy base chunks and per-call state remain executable without importing a nonexistent factory', () => {
   const f = fixture(), file = path.join(utils, 'streamToolHandler.ts'), legacy = f.load(file)
-  const source = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)
-  const unified = f.load(path.join(utils, 'toolParser/index.ts'))
-  for (const node of source.statements) {
-    if (!ts.isImportDeclaration(node) || node.moduleSpecifier.text !== './toolParser/index' || node.importClause?.isTypeOnly) continue
-    for (const item of node.importClause.namedBindings.elements) if (!item.isTypeOnly) assert.ok(Object.hasOwn(unified, item.propertyName?.text ?? item.name.text))
-  }
   const base = legacy.createBaseChunk('fixture-id', 'fixture-model', 123)
   assert.deepEqual(plain(base), { id: 'fixture-id', model: 'fixture-model', object: 'chat.completion.chunk', created: 123 })
   const first = legacy.createToolCallState(), second = legacy.createToolCallState()
@@ -63,10 +55,10 @@ test('adapter-used legacy base chunks and per-call state remain executable witho
   assert.equal(second.contentBuffer, '')
 })
 
-test('legacy compatibility entrypoints have no ambiguous export or missing imported factory diagnostics', () => {
-  const files = [path.join(utils, 'index.ts'), path.join(utils, 'streamToolHandler.ts')]
+test('provider compatibility entrypoint and its dependencies pass strict typechecking', () => {
+  const files = [path.join(utils, 'streamToolHandler.ts')]
   const program = ts.createProgram(files, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
     noEmit: true, skipLibCheck: true, strict: true, allowImportingTsExtensions: true })
-  const issues = ts.getPreEmitDiagnostics(program).filter(item => item.file && files.includes(path.resolve(item.file.fileName)) && [2305, 2308].includes(item.code))
+  const issues = ts.getPreEmitDiagnostics(program)
   assert.deepEqual(issues.map(item => ts.flattenDiagnosticMessageText(item.messageText, '\n')), [])
 })

@@ -5,7 +5,7 @@ import { withProviderNetwork } from '../network/providerContext.ts'
  */
 
 import axios, { AxiosError } from 'axios'
-import { Provider, ValidationResult, AuthType } from './types'
+import { Provider, ValidationResult } from './types'
 import { ProviderChecker } from '../providers/checker'
 import { fetchCustomModels } from '../providers/customApi'
 
@@ -295,81 +295,6 @@ class ChatGPTWebValidator implements Validator {
       valid: false,
       error: `Validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
       validatedAt: Date.now(),
-    }
-  }
-}
-
-/**
- * Generic Token Validator
- * Used for simple validation of custom providers
- */
-class GenericTokenValidator implements Validator {
-  private apiEndpoint: string
-  private headers: Record<string, string>
-
-  constructor(apiEndpoint: string, headers: Record<string, string>) {
-    this.apiEndpoint = apiEndpoint
-    this.headers = headers
-  }
-
-  async validate(credentials: Record<string, string>): Promise<ValidationResult> {
-    const token = credentials.apiKey || credentials.token || credentials.authorization
-    
-    if (!token) {
-      return {
-        valid: false,
-        error: 'Missing authentication token',
-        validatedAt: Date.now(),
-      }
-    }
-    
-    try {
-      const headers: Record<string, string> = {
-        ...this.headers,
-        Authorization: `Bearer ${token}`,
-      }
-      
-      const response = await axios.get(`${this.apiEndpoint}/models`, {
-        headers,
-        timeout: 10000,
-      })
-      
-      if (response.status === 200) {
-        return {
-          valid: true,
-          validatedAt: Date.now(),
-        }
-      }
-      
-      return {
-        valid: false,
-        error: `Validation failed: HTTP ${response.status}`,
-        validatedAt: Date.now(),
-      }
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        const axiosError = error as AxiosError
-        
-        if (axiosError.response?.status === 401) {
-          return {
-            valid: false,
-            error: 'Invalid authentication token',
-            validatedAt: Date.now(),
-          }
-        }
-        
-        return {
-          valid: false,
-          error: `Validation failed: ${axiosError.message}`,
-          validatedAt: Date.now(),
-        }
-      }
-      
-      return {
-        valid: false,
-        error: `Validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        validatedAt: Date.now(),
-      }
     }
   }
 }

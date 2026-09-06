@@ -332,7 +332,7 @@ export class PerplexityStreamHandler {
     if (!filteredContent) return
 
     const baseChunk = createBaseChunk(this.sessionId, this.model, this.created)
-    const { chunks, shouldFlush } = processStreamContent(
+    const { chunks } = processStreamContent(
       filteredContent,
       this.toolCallState,
       baseChunk,

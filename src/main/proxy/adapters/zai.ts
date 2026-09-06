@@ -12,8 +12,6 @@ import { Account, Provider } from '../../store/types'
 import type { ConversationRequestOptions, ProviderConversationState } from '../conversationTypes'
 import { getProviderToolProfile } from '../toolCalling/providerProfiles'
 import type { ToolCallingPlan } from '../toolCalling/types'
-import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
-import { parseToolCallsFromText } from '../utils/toolParser'
 import { isZaiThinkingRequired, resolveZaiWebModel } from './zai-model-options.ts'
 import { 
   createToolCallState, 
@@ -109,17 +107,9 @@ class ZaiResponseDiagnostics {
     return new ZaiUpstreamError('incomplete_stream')
   }
 }
-
-const SEARCH_CITATION_PATTERN = '【turn\\d+search\\d+】'
-const SEARCH_CITATION_PARTIAL_START_PATTERN = '【turn\\d+search\\d+$'
-const SEARCH_CITATION_PARTIAL_END_PATTERN = '^】'
 const SEARCH_CITATION_LOOSE_PATTERN = '【[^】]*turn\\d+search\\d+[^】]*】'
 const SEARCH_CITATION_BRACKET_START = '【'
 const SEARCH_CITATION_BRACKET_END = '】'
-
-function cleanSearchCitations(text: string): string {
-  return text.replace(new RegExp(SEARCH_CITATION_PATTERN, 'g'), '')
-}
 
 function cleanSearchCitationsWithBuffer(text: string, buffer: { value: string }): string {
   const combined = buffer.value + text
@@ -313,12 +303,10 @@ export class ZaiStreamHandler {
   private created: number
   private onEnd?: (chatId: string) => void
   private content: string = ''
-  private toolCallsSent: boolean = false
   private lastMessageId: string = ''
   private toolCallState: ToolCallState
   private sentRole: boolean = false
   private sentThinkingRole: boolean = false
-  private streamEnded: boolean = false
   private citationBuffer: { value: string } = { value: '' }
   private thinkingCitationBuffer: { value: string } = { value: '' }
 
@@ -350,63 +338,6 @@ export class ZaiStreamHandler {
 
   getLastMessageId(): string {
     return this.lastMessageId
-  }
-
-  private sendToolCalls(transStream: PassThrough): void {
-    if (this.toolCallsSent) return
-    
-    const toolCalls = parseToolUse(this.content)
-    if (toolCalls && toolCalls.length > 0) {
-      this.toolCallsSent = true
-      
-      // Send tool_calls delta
-      for (let i = 0; i < toolCalls.length; i++) {
-        const tc = toolCalls[i]
-        transStream.write(
-          `data: ${JSON.stringify({
-            id: this.chatId,
-            model: this.model,
-            object: 'chat.completion.chunk',
-            choices: [{
-              index: 0,
-              delta: {
-                tool_calls: [{
-                  index: i,
-                  id: tc.id,
-                  type: 'function',
-                  function: {
-                    name: tc.function.name,
-                    arguments: tc.function.arguments,
-                  },
-                }],
-              },
-              finish_reason: null,
-            }],
-            created: this.created,
-          })}\n\n`
-        )
-      }
-      
-      // Send finish with tool_calls
-      transStream.write(
-        `data: ${JSON.stringify({
-          id: this.chatId,
-          model: this.model,
-          object: 'chat.completion.chunk',
-          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
-          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          created: this.created,
-        })}\n\n`
-      )
-      transStream.end('data: [DONE]\n\n')
-      if (this.onEnd) {
-        try {
-          this.onEnd(this.chatId)
-        } catch (e) {
-          console.error('[Z.ai] onEnd callback failed; error details omitted')
-        }
-      }
-    }
   }
 
   async handleStream(stream: any): Promise<PassThrough> {

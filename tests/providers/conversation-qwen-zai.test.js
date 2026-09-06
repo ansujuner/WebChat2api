@@ -28,7 +28,6 @@ function load(provider, client) {
       formatToolResult: ({ toolCallId, content }) => `<tool_result id="${toolCallId}">${content}</tool_result>`,
       formatAssistantToolCalls: calls => JSON.stringify(calls),
     }) },
-    '../promptToolUse': { hasToolUse: () => false, parseToolUse: () => [] },
     '../utils/toolParser': { parseToolCallsFromText: content => ({ content, toolCalls: [] }) },
     '../utils/streamToolHandler': {
       createBaseChunk: baseChunk,

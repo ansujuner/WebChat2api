@@ -7,7 +7,7 @@ export const cherryStudioMcpAdapter: ToolClientAdapter = {
   displayName: 'Cherry Studio MCP',
   normalizeRequest(request: ChatCompletionRequest): NormalizedClientToolRequest {
     const tools = normalizeOpenAiTools(request.tools, 'mcp')
-    const toolChoice = normalizeToolChoice(request, new Set(tools.map((tool) => tool.name)))
+    const toolChoice = normalizeToolChoice(request, tools)
 
     return {
       clientAdapterId: 'cherry-studio-mcp',

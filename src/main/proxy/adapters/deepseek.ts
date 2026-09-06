@@ -106,13 +106,9 @@ function unixTimestamp(): number {
 }
 
 export class DeepSeekAdapter {
-  private provider: Provider
-  private account: Account
   private token: string
 
-  constructor(provider: Provider, account: Account) {
-    this.provider = provider
-    this.account = account
+  constructor(_provider: Provider, account: Account) {
     this.token = account.credentials.token || account.credentials.apiKey || account.credentials.refreshToken || ''
   }
 

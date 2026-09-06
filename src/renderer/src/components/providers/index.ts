@@ -1,5 +1,4 @@
 export { ProviderCard } from './ProviderCard'
-export { ProviderList } from './ProviderList'
 export { AddProviderDialog } from './AddProviderDialog'
 export { CustomProviderForm } from './CustomProviderForm'
 export { AccountList } from './AccountList'

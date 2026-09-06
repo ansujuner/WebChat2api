@@ -31,19 +31,22 @@ Chat2API/
 ├── src/
 │   ├── main/                    # Electron 主进程
 │   │   ├── index.ts            # 应用入口点
-│   │   ├── tray.ts             # 系统托盘集成
+│   │   ├── tray/               # TrayManager 与托盘窗口
+│   │   ├── appLogs/            # 应用日志
+│   │   ├── requestLogs/        # 脱敏请求日志
 │   │   ├── proxy/              # 代理服务器管理
 │   │   ├── ipc/                # IPC 处理器
 │   │   ├── store/              # 数据存储
 │   │   ├── oauth/              # OAuth 认证
 │   │   ├── providers/          # 提供商管理
-│   │   └── utils/              # 工具函数
+│   │   └── network/            # 网络传输与代理上下文
 │   ├── preload/                # 上下文桥接
 │   └── renderer/               # React 前端
-│       ├── components/         # UI 组件
-│       ├── pages/              # 页面组件
-│       ├── stores/             # Zustand 状态管理
-│       └── hooks/              # 自定义钩子
+│       └── src/
+│           ├── components/     # UI 组件
+│           ├── pages/          # 页面组件
+│           ├── stores/         # Zustand 状态管理
+│           └── hooks/          # 自定义钩子
 ├── build/                      # 构建资源
 └── scripts/                    # 构建脚本
 ```
@@ -78,6 +81,12 @@ Chat2API/
 - 内置提供商支持
 - 自定义提供商配置
 - 提供商状态检查
+
+#### 3.1.6 当前生产入口与实现
+- `electron.vite.config.ts` 分别构建 `src/main/index.ts`、`src/preload/index.ts` 和 `src/renderer/index.html`；渲染入口为 `src/renderer/src/main.tsx`。
+- 主进程通过 `tray/TrayManager.ts` 管理托盘，通过 `appLogs/manager.ts` 和 `requestLogs/manager.ts` 管理应用日志与请求日志。
+- 工具调用由 `proxy/toolCalling/ToolCallingEngine.ts`、`runtimePlan.ts`、`providerProfiles.ts` 和 `ToolStreamParser.ts` 处理；部分提供商仍使用 `proxy/utils/toolParser.ts` 与 `streamToolHandler.ts` 兼容流式协议。
+- 旧的独立托盘、日志管理器、提示适配器、模型特征表和未接入的缓存/异步存储/解析工具不再作为生产实现保留。
 
 ### 3.2 渲染进程 (Renderer Process)
 
