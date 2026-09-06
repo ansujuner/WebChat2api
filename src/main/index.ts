@@ -78,7 +78,7 @@ function enqueueLocalCommand(argv: string[]): void {
     return
   }
   localCommands = localCommands.then(async () => {
-    const mode = argv.find(arg => /^--chat2api-probe=(catalog|live|stream|deepseek|login|tools|arena-login|arena)$/.test(arg))?.split('=')[1]
+    const mode = argv.find(arg => /^--chat2api-probe=(catalog|live|stream|deepseek|login|tools|arena-login|arena|accounts)$/.test(arg))?.split('=')[1]
     if (!mode) return
     const outputDirectory = app.isPackaged ? join(app.getPath('userData'), 'diagnostics') : join(app.getAppPath(), 'artifacts')
     const reportPath = join(outputDirectory, `proxy-${mode}-probe.json`)
@@ -90,6 +90,11 @@ function enqueueLocalCommand(argv: string[]): void {
       if (mode === 'login' || mode === 'arena-login') {
         const save = (report: unknown) => writeFile(reportPath, JSON.stringify({ ...(report as object), checkedAt: new Date().toISOString() }, null, 2), 'utf8')
         await save(await (mode === 'login' ? runDeepSeekLoginProbe(save) : runArenaLoginProbe(save)))
+        return
+      }
+      if (mode === 'accounts') {
+        const { runAccountLivenessProbe } = await import('./diagnostics/accountLiveness')
+        await writeFile(reportPath, JSON.stringify({ ...options, ...await runAccountLivenessProbe(), checkedAt: new Date().toISOString() }, null, 2), 'utf8')
         return
       }
       await startProxyService()

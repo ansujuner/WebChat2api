@@ -53,6 +53,8 @@ export interface Account {
   email?: string
   providerUserId?: string
   credentials: Record<string, string>
+  /** Internal credential identity revision. Legacy records use zero; callers cannot assign it. */
+  credentialRevision?: number
   status: AccountStatus
   enabled?: boolean
   cooldownUntil?: number

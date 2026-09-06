@@ -46,6 +46,8 @@ interface AccountDetailProps {
   onEdit: () => void
   onDelete: () => void
   onValidate: () => Promise<void>
+  onTest: () => void
+  livenessBusy: boolean
 }
 
 export function AccountDetail({
@@ -55,6 +57,8 @@ export function AccountDetail({
   onEdit,
   onDelete,
   onValidate,
+  onTest,
+  livenessBusy,
 }: AccountDetailProps) {
   const { t, i18n } = useTranslation()
   const [isValidating, setIsValidating] = useState(false)
@@ -230,6 +234,9 @@ export function AccountDetail({
         </div>
         <div className="flex items-center gap-2">
           <AccountAvailabilityControl account={account} />
+          <Button variant="outline" size="sm" onClick={onTest} disabled={livenessBusy} title={t('accountLiveness.singleHint')}>
+            <Activity className="mr-2 h-4 w-4" />{t('accountLiveness.single')}
+          </Button>
           <Button
             variant="outline"
             size="sm"

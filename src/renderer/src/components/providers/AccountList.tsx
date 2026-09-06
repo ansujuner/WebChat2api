@@ -52,6 +52,9 @@ interface AccountListProps {
   onDeleteAccount: (id: string) => void
   onValidateAccount: (id: string) => void
   onViewDetail: (account: Account) => void
+  onTestAccount: (id: string) => void
+  onTestProvider: () => void
+  livenessBusy: boolean
 }
 
 export function AccountList({
@@ -62,6 +65,9 @@ export function AccountList({
   onDeleteAccount,
   onValidateAccount,
   onViewDetail,
+  onTestAccount,
+  onTestProvider,
+  livenessBusy,
 }: AccountListProps) {
   const { t } = useTranslation()
   const [validatingIds, setValidatingIds] = useState<Set<string>>(new Set())
@@ -186,10 +192,15 @@ export function AccountList({
           <span>•</span>
           <span className="text-green-600">{activeCount} {t('providers.onlineCount')}</span>
         </div>
-        <Button size="sm" onClick={onAddAccount}>
-          <Plus className="mr-2 h-4 w-4" />
-          {t('providers.addAccount')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" disabled={livenessBusy} onClick={onTestProvider}>
+            <Activity className="mr-2 h-4 w-4" />{t('accountLiveness.providerBatch')}
+          </Button>
+          <Button size="sm" onClick={onAddAccount}>
+            <Plus className="mr-2 h-4 w-4" />
+            {t('providers.addAccount')}
+          </Button>
+        </div>
       </div>
 
       <ScrollArea className="h-[calc(100vh-400px)]">
@@ -246,6 +257,11 @@ export function AccountList({
 
                     <div className="flex items-center gap-2">
                       <AccountAvailabilityControl account={account} />
+                      <Button size="sm" variant="outline" disabled={livenessBusy}
+                        title={t('accountLiveness.singleHint')}
+                        onClick={event => { event.stopPropagation(); onTestAccount(account.id) }}>
+                        <Activity className="mr-1 h-4 w-4" />{t('accountLiveness.single')}
+                      </Button>
                       <div className="text-right text-xs text-muted-foreground">
                         <div>{t('providers.lastCheck')}</div>
                         <div>{formatDate(account.lastUsed)}</div>

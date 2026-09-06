@@ -24,6 +24,8 @@ import type {
   EffectiveModel,
   BrowserRuntimeInfo,
 } from '../../../shared/types'
+import type { AccountLivenessInput, AccountLivenessJob } from '../../../shared/accountLiveness'
+export type { AccountLivenessInput, AccountLivenessJob } from '../../../shared/accountLiveness'
 
 export type { 
   Provider, 
@@ -140,6 +142,10 @@ interface AccountsAPI {
   setEnabled: (id: string, enabled: boolean) => Promise<Account | null>
   clearSuspension: (id: string) => Promise<Account | null>
   onChanged: (callback: () => void) => () => void
+  livenessStart: (input: AccountLivenessInput) => Promise<AccountLivenessJob>
+  livenessGet: () => Promise<AccountLivenessJob | null>
+  livenessCancel: (jobId: string) => Promise<AccountLivenessJob | null>
+  onLivenessChanged: (callback: (job: AccountLivenessJob) => void) => () => void
   delete: (id: string) => Promise<boolean>
   validate: (accountId: string) => Promise<boolean>
   validateToken: (providerId: string, credentials: Record<string, string>) => Promise<{

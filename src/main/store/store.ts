@@ -55,6 +55,14 @@ let Store: any = null
  */
 type StoreType = any
 
+function validCredentialRecord(value: unknown): value is Record<string, string> {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(item => typeof item === 'string')
+}
+
+function credentialRevision(account: Account): number {
+  return Number.isSafeInteger(account.credentialRevision) && account.credentialRevision! >= 0 ? account.credentialRevision! : 0
+}
+
 /**
  * Storage Manager Class
  * Responsible for data persistence and encryption
@@ -698,11 +706,13 @@ export class StoreManager {
   addAccount(account: Account): void {
     this.ensureInitialized()
     validateAccountAvailabilityUpdate(account)
+    if (!validCredentialRecord(account.credentials)) throw new Error('Invalid account credentials')
     const accounts = this.store!.get('accounts') || []
     
     const encryptedAccount: Account = {
       ...normalizeAccountIdentity(account, this.getProviderById(account.providerId)?.name || account.providerId),
       credentials: this.encryptCredentials(account.credentials),
+      credentialRevision: 0,
     }
 
     this.store!.set('accounts', [...accounts, encryptedAccount])
@@ -716,6 +726,7 @@ export class StoreManager {
   updateAccount(id: string, updates: Partial<Account>): Account | null {
     this.ensureInitialized()
     validateAccountAvailabilityUpdate(updates)
+    if (updates.credentials !== undefined && !validCredentialRecord(updates.credentials)) throw new Error('Invalid account credentials')
     const accounts = this.store!.get('accounts') as Account[] || []
     const index = accounts.findIndex((a: Account) => a.id === id)
     
@@ -730,8 +741,10 @@ export class StoreManager {
     const updatedAccount: Account = {
       ...identity,
       credentials: updates.credentials ? this.encryptCredentials(updates.credentials) : accounts[index].credentials,
+      credentialRevision: credentialRevision(accounts[index]) + (updates.credentials !== undefined ? 1 : 0),
       updatedAt: Date.now(),
     }
+    if (!Number.isSafeInteger(updatedAccount.credentialRevision)) throw new Error('Account credential revision exhausted')
 
     this.store!.set('accounts', accounts.map((account, accountIndex) => accountIndex === index ? updatedAccount : account))
     this.refreshAccountAvailability()
@@ -741,6 +754,26 @@ export class StoreManager {
       ...updatedAccount,
       credentials: updates.credentials || this.decryptCredentials(updatedAccount.credentials),
     }
+  }
+
+  /** Main-process-only official rotation: synchronous plaintext compare-and-swap, never exposed over IPC. */
+  rotateAccountCredentials(id: string, expectedCredentials: Record<string, string>, newCredentials: Record<string, string>): Account | null {
+    this.ensureInitialized()
+    if (!validCredentialRecord(expectedCredentials) || !validCredentialRecord(newCredentials)) throw new Error('Invalid account credential rotation')
+    const accounts = (this.store!.get('accounts') || []) as Account[]
+    const current = accounts.find(account => account.id === id)
+    if (!current) return null
+    const decrypted = this.decryptCredentials(current.credentials)
+    const keys = Object.keys(decrypted)
+    if (keys.length !== Object.keys(expectedCredentials).length || keys.some(key => !Object.hasOwn(expectedCredentials, key) || decrypted[key] !== expectedCredentials[key])) return null
+    const credentials = { ...decrypted, ...newCredentials }
+    // Identical refresh responses require no disk write, but still perform the compare-and-swap check.
+    if (Object.keys(credentials).length === keys.length && keys.every(key => credentials[key] === decrypted[key])) return { ...current, credentials }
+    const updated: Account = { ...current, credentials: this.encryptCredentials(credentials), credentialRevision: credentialRevision(current), updatedAt: Date.now() }
+    this.store!.set('accounts', accounts.map(account => account.id === id ? updated : account))
+    this.refreshAccountAvailability()
+    this.notifyAccountsChanged()
+    return { ...updated, credentials }
   }
 
   /**

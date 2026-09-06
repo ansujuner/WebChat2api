@@ -29,6 +29,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Server, ArrowLeft } from 'lucide-react'
 import { validatedAccountIdentity } from '../../../shared/accountIdentity'
 import { accountAvailability } from '../../../shared/accountAvailability'
+import { useAccountLiveness } from '@/hooks/useAccountLiveness'
+import { AccountLivenessPanel } from '@/components/providers/AccountLivenessPanel'
+import { Button } from '@/components/ui/button'
 
 type ViewMode = 'providers' | 'accounts' | 'account-detail'
 
@@ -36,6 +39,7 @@ export function Providers() {
   const { t } = useTranslation()
   const { toast } = useToast()
   const store = useProvidersStore()
+  const liveness = useAccountLiveness()
   const hasLoadedRef = useRef(false)
 
   useEffect(() => {
@@ -607,6 +611,7 @@ export function Providers() {
   if (viewMode === 'account-detail' && selectedAccount && selectedProvider) {
     return (
       <div className="space-y-6">
+        <AccountLivenessPanel controller={liveness} />
         <AccountDetail
           account={selectedAccount}
           provider={selectedProvider}
@@ -619,6 +624,8 @@ export function Providers() {
           }}
           onDelete={() => handleDeleteAccount(selectedAccount.id)}
           onValidate={() => handleValidateAccount(selectedAccount.id)}
+          onTest={() => { void liveness.start({ accountIds: [selectedAccount.id] }) }}
+          livenessBusy={liveness.busy}
         />
       </div>
     )
@@ -646,6 +653,8 @@ export function Providers() {
           </p>
         </div>
 
+        <AccountLivenessPanel controller={liveness} />
+
         <AccountList
           accounts={providerAccounts}
           providerId={selectedProvider.id}
@@ -658,6 +667,9 @@ export function Providers() {
           onDeleteAccount={handleDeleteAccount}
           onValidateAccount={handleValidateAccount}
           onViewDetail={handleViewAccountDetail}
+          onTestAccount={id => { void liveness.start({ accountIds: [id] }) }}
+          onTestProvider={() => { void liveness.start({ providerId: selectedProvider.id }) }}
+          livenessBusy={liveness.busy}
         />
 
         <AddAccountDialog
@@ -683,7 +695,11 @@ export function Providers() {
           <h2 className="text-2xl font-bold tracking-tight">{t('providers.title')}</h2>
           <p className="text-muted-foreground">{t('providers.subtitle')}</p>
         </div>
+        <Button variant="outline" disabled={liveness.busy || store.accounts.length === 0}
+          onClick={() => { void liveness.start({}) }}>{t('accountLiveness.allAccounts')}</Button>
       </div>
+
+      <AccountLivenessPanel controller={liveness} />
 
       <ProviderFilter
         searchQuery={searchQuery}

@@ -4,7 +4,7 @@
  */
 
 import axios, { AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios'
-import { PassThrough } from 'stream'
+import { PassThrough, Readable } from 'stream'
 import { Account, Provider } from '../store/types'
 import { ForwardResult, ChatCompletionRequest, ProxyContext, type ChatMessage as ContextChatMessage } from './types'
 import { proxyStatusManager } from './status'
@@ -19,7 +19,7 @@ import { KimiAdapter, KimiStreamHandler } from './adapters/kimi'
 import { MimoAdapter, MimoStreamHandler } from './adapters/mimo'
 import { QwenAdapter, QwenStreamHandler } from './adapters/qwen'
 import { QwenAiAdapter, QwenAiStreamHandler } from './adapters/qwen-ai'
-import { ZaiAdapter, ZaiStreamHandler } from './adapters/zai'
+import { ZaiAdapter, ZaiStreamHandler, ZaiUpstreamError } from './adapters/zai'
 import { MiniMaxAdapter, MiniMaxStreamHandler } from './adapters/minimax'
 import { PerplexityAdapter } from './adapters/perplexity'
 import { PerplexityStreamHandler } from './adapters/perplexity-stream'
@@ -29,15 +29,28 @@ import { ArenaError } from '../arena/protocol'
 import { ToolCallingEngine } from './toolCalling/ToolCallingEngine'
 import type { ToolCallingTransformResult } from './toolCalling/types'
 import { sessionManager } from './sessionManager'
-import { getConversationOptions } from './conversationContinuity'
+import { getConversationOptions, setConversationAbortSignal } from './conversationContinuity'
 import type { ProviderConversationState } from './conversationTypes'
 import {
   createContextManagementService,
   SummaryGenerator,
 } from './services/contextManagementService'
 
+// Capability is held only by this module; neither JSON nor an HTTP header can opt in.
+const accountProbeRequests = new WeakSet<ChatCompletionRequest>()
+const accountProbeResponseCleanup = new WeakMap<ChatCompletionRequest, Set<() => void>>()
+const oversizedAccountProbes = new WeakSet<ChatCompletionRequest>()
+const PROBE_RESPONSE_LIMIT = 1024 * 1024
+const PROBE_RESPONSE_LIMIT_MESSAGE = 'Account test response exceeded the safe size limit.'
+function getForwardConversationOptions(request: ChatCompletionRequest) {
+  const options = getConversationOptions(request)
+  // A probe always creates its own short chat. Never bind to or clean up another chat,
+  // and do not inherit global single-chat deletion timers or generate a title.
+  return accountProbeRequests.has(request) ? { ...options, retainConversation: true } : options
+}
+
 function shouldDeleteSession(request: ChatCompletionRequest): boolean {
-  return !getConversationOptions(request).retainConversation && sessionManager.shouldDeleteAfterChat()
+  return !getForwardConversationOptions(request).retainConversation && sessionManager.shouldDeleteAfterChat()
 }
 
 function recordDeepSeekRestriction(accountId: string, restriction: DeepSeekRestriction): void {
@@ -52,7 +65,7 @@ function recordDeepSeekRestriction(accountId: string, restriction: DeepSeekRestr
 function attachConversationListener(request: ChatCompletionRequest, handler: {
   setConversationListener(listener: (state: ProviderConversationState) => void): void
 }): void {
-  const listener = getConversationOptions(request).onConversation
+  const listener = getForwardConversationOptions(request).onConversation
   if (listener) handler.setConversationListener(listener)
 }
 
@@ -143,17 +156,109 @@ export class RequestForwarder {
     return this.providerForwarders.some(entry => entry.matches(provider))
   }
 
+  /** Local exact-account probe: no routing/retries or manual switch changes; official restriction handling remains active. */
+  async forwardAccountProbe(accountId: string, actualModel: string, signal?: AbortSignal, displayModel?: string): Promise<ForwardResult> {
+    const validText = (value: unknown): value is string => typeof value === 'string' && value.length > 0
+      && value.length <= 256 && value.trim() === value && !/[\u0000-\u001f\u007f*]/.test(value)
+    if (!validText(accountId) || !validText(actualModel) || (displayModel !== undefined && !validText(displayModel))) {
+      return { success: false, status: 400, errorCode: 'invalid_account_probe', error: 'Invalid account test selection.', latency: 0 }
+    }
+    if (signal?.aborted) return this.cancelledAccountProbe()
+    const account = storeManager.getAccountById(accountId)
+    const provider = account ? storeManager.getProviderById(account.providerId) : undefined
+    if (!account || !provider) return { success: false, status: 404, errorCode: 'account_probe_not_found', error: 'The account or its provider no longer exists.', latency: 0 }
+    const request: ChatCompletionRequest = {
+      model: displayModel ?? actualModel,
+      messages: [{ role: 'user', content: '你好，请只回复 OK。' }],
+      stream: false, max_tokens: 32,
+    }
+    accountProbeRequests.add(request)
+    accountProbeResponseCleanup.set(request, new Set())
+    if (signal) setConversationAbortSignal(request, signal)
+    try {
+      // Await real settlement even if a transport ignores AbortSignal. The caller must
+      // not release its per-account job lock merely because its deadline has elapsed.
+      const result = await this.doForward(request, account, provider, actualModel, {
+        requestId: 'account-probe', model: request.model, actualModel, startTime: Date.now(), isStream: false,
+      })
+      if (oversizedAccountProbes.has(request)) return { success: false, status: 502,
+        errorCode: 'account_probe_response_too_large', error: PROBE_RESPONSE_LIMIT_MESSAGE, latency: result.latency }
+      return signal?.aborted ? this.cancelledAccountProbe(result.latency) : result
+    } catch {
+      return signal?.aborted ? this.cancelledAccountProbe() : {
+        success: false, status: 502, errorCode: 'account_probe_failed', error: 'Account test failed. It was not retried.', latency: 0,
+      }
+    } finally {
+      accountProbeResponseCleanup.get(request)?.forEach(cleanup => cleanup())
+      accountProbeResponseCleanup.delete(request)
+      oversizedAccountProbes.delete(request)
+      accountProbeRequests.delete(request)
+    }
+  }
+
+  private cancelledAccountProbe(latency = 0): ForwardResult {
+    return { success: false, status: 499, errorCode: 'account_probe_cancelled', error: 'Account test was cancelled.', latency }
+  }
+
+  /** Stop only the raw response owned by this probe, never a shared browser/session. */
+  private bindProbeCancellation(request: ChatCompletionRequest, source: any): any {
+    if (!accountProbeRequests.has(request)) return source
+    const signal = getForwardConversationOptions(request).signal
+    if (signal?.aborted) {
+      source?.destroy?.()
+      throw new Error('Account test was cancelled.')
+    }
+    if (typeof source?.destroy !== 'function' || typeof source?.[Symbol.asyncIterator] !== 'function' || source.destroyed || source.readableEnded) return source
+    // The generator is lazy: no data listener or pipe starts the upstream flowing
+    // before the parser subscribes. Backpressure and UTF-8 bytes remain intact.
+    const bounded = Readable.from((async function* () {
+      let bytes = 0
+      try {
+        for await (const chunk of source) {
+          bytes += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.byteLength
+          if (!Number.isSafeInteger(bytes) || bytes > PROBE_RESPONSE_LIMIT) {
+            oversizedAccountProbes.add(request)
+            throw new Error(PROBE_RESPONSE_LIMIT_MESSAGE)
+          }
+          yield chunk
+        }
+      } finally { if (!source.destroyed && !source.readableEnded) source.destroy() }
+    })())
+    const abort = () => { source.destroy(); bounded.destroy(new Error('Account test was cancelled.')) }
+    const sourceError = (error: Error) => bounded.destroy(error)
+    const cleanup = () => {
+      signal?.removeEventListener('abort', abort)
+      bounded.removeListener('end', cleanup)
+      bounded.removeListener('close', cleanup)
+      bounded.removeListener('error', cleanup)
+      source.removeListener('error', sourceError)
+      accountProbeResponseCleanup.get(request)?.delete(release)
+      if (!source.destroyed && !source.readableEnded) source.destroy()
+    }
+    // A non-2xx response may return before its body is consumed. Close only that
+    // owned response on settlement, so its socket/listeners do not outlive the job.
+    const release = () => { cleanup(); source.destroy(); bounded.destroy() }
+    accountProbeResponseCleanup.get(request)?.add(release)
+    bounded.once('end', cleanup)
+    bounded.once('close', cleanup)
+    bounded.once('error', cleanup)
+    source.once('error', sourceError)
+    signal?.addEventListener('abort', abort, { once: true })
+    return bounded
+  }
+
   private async forwardArena(request: ChatCompletionRequest, account: Account, provider: Provider, actualModel: string, startTime: number): Promise<ForwardResult> {
     try {
       if (request.model.startsWith('arena/image/')) throw new ArenaError('invalid_request')
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       const { response, sessionId } = await new ArenaAdapter(provider, account).chatCompletion({
-        ...request, ...getConversationOptions(request), model: actualModel, messages: transformed.messages, tools: transformed.tools,
+        ...request, ...getForwardConversationOptions(request), model: actualModel, messages: transformed.messages, tools: transformed.tools,
       })
+      const responseData = this.bindProbeCancellation(request, response.data)
       const handler = new ArenaStreamHandler(request.model, sessionId, transformed.plan, { id: sessionId, modelId: actualModel, modality: 'text' })
       attachConversationListener(request, handler)
-      if (request.stream) return { success: true, status: 200, headers: {}, stream: await handler.handleStream(response.data), skipTransform: true, latency: Date.now()-startTime }
-      return { success: true, status: 200, headers: {}, body: await handler.handleNonStream(response.data), latency: Date.now()-startTime }
+      if (request.stream) return { success: true, status: 200, headers: {}, stream: await handler.handleStream(responseData), skipTransform: true, latency: Date.now()-startTime }
+      return { success: true, status: 200, headers: {}, body: await handler.handleNonStream(responseData), latency: Date.now()-startTime }
     } catch (error) {
       const known = error instanceof ArenaError
       if (known && error.diagnostic) console.error('[Arena] Request stage:', JSON.stringify(error.diagnostic))
@@ -176,6 +281,17 @@ export class RequestForwarder {
     request: ChatCompletionRequest,
     provider?: Provider
   ): ToolCallingTransformResult {
+    if (accountProbeRequests.has(request)) return {
+      messages: request.messages,
+      plan: {
+        mode: 'disabled', protocol: 'openai_chat', clientAdapterId: 'standard-openai-tools',
+        providerId: provider?.id ?? 'custom', tools: [], shouldInjectPrompt: false,
+        shouldParseResponse: false, toolChoiceMode: 'none', allowedToolNames: new Set(),
+        diagnostics: { clientAdapterId: 'standard-openai-tools', providerId: provider?.id ?? 'custom',
+          toolSource: 'none', mode: 'disabled', protocol: 'openai_chat', toolCount: 0,
+          injected: false, reason: 'account_probe' },
+      },
+    }
     const config = storeManager.getConfig().toolCallingConfig
     const engine = new ToolCallingEngine(config)
 
@@ -193,15 +309,16 @@ export class RequestForwarder {
         updatedAt: 0,
       },
       actualModel: request.model,
-      contextAlreadyInitialized: !!getConversationOptions(request).conversation,
+      contextAlreadyInitialized: !!getForwardConversationOptions(request).conversation,
     })
     // Preserve the parser plan, without rendering or sending a repeated schema.
-    return getConversationOptions(request).conversation
+    return getForwardConversationOptions(request).conversation
       ? { ...transformed, messages: request.messages, tools: undefined }
       : transformed
   }
 
   private applyToolCallsToResponse(result: any, transformed: ToolCallingTransformResult): void {
+    if (!transformed.plan?.shouldParseResponse) return
     const engine = new ToolCallingEngine(storeManager.getConfig().toolCallingConfig)
     engine.applyNonStreamResponse(result, transformed.plan)
   }
@@ -288,7 +405,7 @@ export class RequestForwarder {
   ): Promise<ForwardResult> {
     const startTime = Date.now()
     const config = storeManager.getConfig()
-    const retained = getConversationOptions(request).retainConversation
+    const retained = getForwardConversationOptions(request).retainConversation
     // A retry could append the same input twice after an uncertain upstream response.
     const maxRetries = retained || this.supportsConversation(provider) ? 0 : config.retryCount
 
@@ -387,10 +504,38 @@ export class RequestForwarder {
     const startTime = Date.now()
 
     // Selection can become stale while context preparation is awaiting work.
-    const current = storeManager.getAccountById(account.id)
-    const availability = current ? accountAvailability(current) : { available: false, reason: 'missing' }
-    if (!availability.available) return { success: false, status: 409, errorCode: 'account_unavailable',
-      error: 'This account is disabled, cooling down or unavailable. It was not submitted to the provider.', latency: 0 }
+    const probe = accountProbeRequests.has(request)
+    const current = storeManager.getAccountById(account.id, probe)
+    // Only a local explicit check may disregard a manual switch or stale auth status.
+    // The persisted permanent-ban marker, cooldown and daily budget still win.
+    const permanentlyBanned = current?.errorMessage === 'DeepSeek account suspended; manual review required.'
+      || current?.errorMessage === 'account_banned'
+    const availability = current && (!probe || !permanentlyBanned)
+      ? accountAvailability(probe ? { ...current, enabled: true, status: 'active' } : current)
+      : { available: false, reason: 'missing' }
+    if (!availability.available) {
+      if (probe) {
+        const errorCode = permanentlyBanned ? 'account_banned' : !current ? 'account_probe_not_found'
+          : availability.reason === 'cooldown' ? 'account_temporarily_suspended' : 'account_daily_limit'
+        return { success: false, status: permanentlyBanned ? 403 : !current ? 404 : 429, errorCode,
+          error: 'The account test was blocked before submission by its current account restrictions.', latency: 0,
+          ...('availableAt' in availability && availability.availableAt ? { headers: {
+            'retry-after': String(Math.max(1, Math.ceil((availability.availableAt - Date.now()) / 1000))),
+          } } : {}) }
+      }
+      return { success: false, status: 409, errorCode: 'account_unavailable',
+        error: 'This account is disabled, cooling down or unavailable. It was not submitted to the provider.', latency: 0 }
+    }
+
+    if (probe && getForwardConversationOptions(request).signal?.aborted) return this.cancelledAccountProbe()
+    if (probe && current) {
+      // Fresh credentials and provider affiliation, not the caller's previous selection.
+      account = current
+      const freshProvider = storeManager.getProviderById(current.providerId)
+      if (!freshProvider || freshProvider.id !== provider.id) return { success: false, status: 409,
+        errorCode: 'account_probe_selection_changed', error: 'The account provider changed before submission.', latency: 0 }
+      provider = freshProvider
+    }
 
     const dedicatedForwarder = this.providerForwarders.find(forwarder => forwarder.matches(provider))
     if (dedicatedForwarder) {
@@ -411,6 +556,8 @@ export class RequestForwarder {
         timeout: proxyStatusManager.getConfig().timeout,
         responseType: request.stream ? 'stream' : 'json',
         validateStatus: () => true,
+        signal: getForwardConversationOptions(request).signal,
+        ...(probe ? { maxContentLength: PROBE_RESPONSE_LIMIT, maxBodyLength: 16 * 1024 } : {}),
       }
 
       const response: AxiosResponse = await this.axiosInstance.request(axiosConfig)
@@ -446,6 +593,10 @@ export class RequestForwarder {
       const latency = Date.now() - startTime
 
       if (error instanceof AxiosError) {
+        if (probe && /^maxContentLength size of \d+ exceeded$/.test(error.message)) return {
+          success: false, status: 502, errorCode: 'account_probe_response_too_large',
+          error: PROBE_RESPONSE_LIMIT_MESSAGE, latency,
+        }
         return {
           success: false,
           status: error.response?.status,
@@ -483,7 +634,7 @@ export class RequestForwarder {
       const adapter = new DeepSeekAdapter(provider, account)
       
       const { response, sessionId } = await adapter.chatCompletion({
-        ...getConversationOptions(request),
+        ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.model,
         messages: transformedRequest.messages as any,
@@ -492,18 +643,19 @@ export class RequestForwarder {
         web_search: transformedRequest.web_search,
         reasoning_effort: transformedRequest.reasoning_effort,
       })
+      const responseData = this.bindProbeCancellation(request, response.data)
 
       const latency = Date.now() - startTime
 
       if (response.status >= 400) {
         let errorMessage = `HTTP ${response.status}`
-        if (response.data) {
-          if (typeof response.data === 'string') {
-            errorMessage = response.data
-          } else if (response.data.msg) {
-            errorMessage = response.data.msg
-          } else if (response.data.error?.message) {
-            errorMessage = response.data.error.message
+        if (responseData) {
+          if (typeof responseData === 'string') {
+            errorMessage = responseData
+          } else if (responseData.msg) {
+            errorMessage = responseData.msg
+          } else if (responseData.error?.message) {
+            errorMessage = responseData.error.message
           }
         }
         return {
@@ -540,7 +692,7 @@ export class RequestForwarder {
       attachConversationListener(request, handler)
       
       if (request.stream) {
-        const transformedStream = await handler.handleStream(response.data)
+        const transformedStream = await handler.handleStream(responseData)
         
         return {
           success: true,
@@ -554,7 +706,7 @@ export class RequestForwarder {
       }
 
       // Non-streaming requests need to collect stream data and convert
-      const result = await handler.handleNonStream(response.data)
+      const result = await handler.handleNonStream(responseData)
       
       this.applyToolCallsToResponse(result, transformed)
       
@@ -605,7 +757,7 @@ export class RequestForwarder {
 
       const adapter = new GLMAdapter(provider, account)
       const { response, conversationId } = await adapter.chatCompletion({
-        ...getConversationOptions(request),
+        ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.model,
         messages: transformedRequest.messages,
@@ -615,20 +767,21 @@ export class RequestForwarder {
         reasoning_effort: transformedRequest.reasoning_effort,
         deep_research: transformedRequest.deep_research,
       })
+      const responseData = this.bindProbeCancellation(request, response.data)
 
       const latency = Date.now() - startTime
 
       if (response.status >= 400) {
         let errorMessage = `HTTP ${response.status}`
-        if (response.data) {
-          if (typeof response.data === 'string') {
-            errorMessage = response.data
-          } else if (response.data.msg) {
-            errorMessage = response.data.msg
-          } else if (response.data.message) {
-            errorMessage = response.data.message
-          } else if (response.data.error?.message) {
-            errorMessage = response.data.error.message
+        if (responseData) {
+          if (typeof responseData === 'string') {
+            errorMessage = responseData
+          } else if (responseData.msg) {
+            errorMessage = responseData.msg
+          } else if (responseData.message) {
+            errorMessage = responseData.message
+          } else if (responseData.error?.message) {
+            errorMessage = responseData.error.message
           }
         }
         return {
@@ -643,7 +796,7 @@ export class RequestForwarder {
       attachConversationListener(request, handler)
       
       if (request.stream) {
-        const transformedStream = await handler.handleStream(response.data)
+        const transformedStream = await handler.handleStream(responseData)
         
         // If delete session after chat is enabled, we need to handle it after stream ends
         if (shouldDeleteSession(request)) {
@@ -670,7 +823,7 @@ export class RequestForwarder {
         }
       }
 
-      const result = await handler.handleNonStream(response.data)
+      const result = await handler.handleNonStream(responseData)
       
       this.applyToolCallsToResponse(result, transformed)
       
@@ -711,7 +864,7 @@ export class RequestForwarder {
       
       const adapter = new KimiAdapter(provider, account)
       const { response, conversationId } = await adapter.chatCompletion({
-        ...getConversationOptions(request),
+        ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.model,
         messages: transformed.messages,
@@ -721,6 +874,7 @@ export class RequestForwarder {
         reasoning_effort: request.reasoning_effort,
         enableWebSearch: !!request.web_search,
       })
+      const responseData = this.bindProbeCancellation(request, response.data)
 
       const latency = Date.now() - startTime
 
@@ -738,7 +892,7 @@ export class RequestForwarder {
       attachConversationListener(request, handler)
       
       if (request.stream) {
-        const transformedStream = await handler.handleStream(response.data)
+        const transformedStream = await handler.handleStream(responseData)
         
         // Add delete conversation callback if needed
         if (shouldDeleteSession(request)) {
@@ -765,7 +919,7 @@ export class RequestForwarder {
         }
       }
 
-      const result = await handler.handleNonStream(response.data)
+      const result = await handler.handleNonStream(responseData)
 
       this.applyToolCallsToResponse(result, transformed)
 
@@ -814,7 +968,7 @@ export class RequestForwarder {
 
       const adapter = new QwenAdapter(provider, account)
       const { response, sessionId, reqId } = await adapter.chatCompletion({
-        ...getConversationOptions(request),
+        ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.model,
         messages: transformedRequest.messages as any,
@@ -823,6 +977,7 @@ export class RequestForwarder {
         enableThinking: !!request.reasoning_effort,
         enableWebSearch: !!request.web_search,
       })
+      const responseData = this.bindProbeCancellation(request, response.data)
 
       const latency = Date.now() - startTime
 
@@ -850,7 +1005,7 @@ export class RequestForwarder {
       attachConversationListener(request, handler)
 
       if (request.stream) {
-        const transformedStream = await handler.handleStream(response.data, response)
+        const transformedStream = await handler.handleStream(responseData, response)
 
         return {
           success: true,
@@ -863,7 +1018,7 @@ export class RequestForwarder {
         }
       }
 
-      const result = await handler.handleNonStream(response.data, response)
+      const result = await handler.handleNonStream(responseData, response)
 
       this.applyToolCallsToResponse(result, transformed)
 
@@ -905,7 +1060,7 @@ export class RequestForwarder {
       
       const adapter = new QwenAiAdapter(provider, account)
       const { response, chatId, parentId } = await adapter.chatCompletion({
-        ...getConversationOptions(request),
+        ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.model,
         messages: transformed.messages as any,
@@ -913,6 +1068,7 @@ export class RequestForwarder {
         temperature: request.temperature,
         enable_thinking: !!request.reasoning_effort,
       })
+      const responseData = this.bindProbeCancellation(request, response.data)
 
       const latency = Date.now() - startTime
 
@@ -931,7 +1087,7 @@ export class RequestForwarder {
       handler.setChatId(chatId)
 
       if (request.stream) {
-        const transformedStream = await handler.handleStream(response.data)
+        const transformedStream = await handler.handleStream(responseData)
 
         if (shouldDeleteSession(request)) {
           const originalEnd = transformedStream.end.bind(transformedStream)
@@ -954,7 +1110,7 @@ export class RequestForwarder {
         }
       }
 
-      const result = await handler.handleNonStream(response.data)
+      const result = await handler.handleNonStream(responseData)
 
       this.applyToolCallsToResponse(result, transformed)
 
@@ -997,7 +1153,7 @@ export class RequestForwarder {
       
       const adapter = new ZaiAdapter(provider, account)
       const { response, chatId, requestId } = await adapter.chatCompletion({
-        ...getConversationOptions(request),
+        ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.model,
         messages: transformed.messages as any,
@@ -1006,12 +1162,13 @@ export class RequestForwarder {
         web_search: request.web_search,
         reasoning_effort: request.reasoning_effort,
       })
+      const responseData = this.bindProbeCancellation(request, response.data)
 
       const latency = Date.now() - startTime
 
       if (response.status !== 200) {
         // Do not hand a consumed, stalled, or redirect/error body to the chat parser.
-        response.data?.destroy?.()
+        responseData?.destroy?.()
         let errorMessage = `HTTP ${response.status}`
         return {
           success: false,
@@ -1036,7 +1193,7 @@ export class RequestForwarder {
       handler.setChatId(chatId)
       
       if (request.stream === true) {
-        const transformedStream = await handler.handleStream(response.data)
+        const transformedStream = await handler.handleStream(responseData)
         
         return {
           success: true,
@@ -1049,7 +1206,7 @@ export class RequestForwarder {
         }
       }
 
-      const result = await handler.handleNonStream(response.data)
+      const result = await handler.handleNonStream(responseData)
 
       this.applyToolCallsToResponse(result, transformed)
       
@@ -1067,6 +1224,30 @@ export class RequestForwarder {
       }
     } catch (error) {
       const latency = Date.now() - startTime
+      if (accountProbeRequests.has(request)) {
+        // Only typed adapter failures may influence probe classification; never parse
+        // arbitrary exception prose or export the raw provider message/upstreamCode.
+        let status = 502, errorCode = 'upstream_error'
+        if (error instanceof ZaiUpstreamError) {
+          switch (error.category) {
+            case 'captcha_required':
+            case 'verification_required':
+            case 'access_denied': status = 403; errorCode = 'action_required'; break
+            case 'authentication_required': status = 401; errorCode = 'authentication_required'; break
+            case 'rate_limited': status = 429; errorCode = 'rate_limited'; break
+            case 'quota_exceeded': status = 429; errorCode = 'rate_limited'; break
+            case 'model_unavailable': status = 404; errorCode = 'model_unavailable'; break
+            case 'invalid_json':
+            case 'unexpected_json':
+            case 'incomplete_stream': errorCode = 'incomplete_response'; break
+            case 'transport_error': errorCode = 'transport_error'; break
+            case 'upstream_error': break
+          }
+        }
+        return { success: false, status, errorCode,
+          error: 'Z.ai account test failed. Check the reported category; the request was not retried.', latency }
+      }
+
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -1092,13 +1273,14 @@ export class RequestForwarder {
       
       const adapter = new MiniMaxAdapter(provider, account)
       const { response, stream, chatId } = await adapter.chatCompletion({
-        ...getConversationOptions(request),
+        ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.model,
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
       })
+      const responseData = this.bindProbeCancellation(request, response?.data ?? stream?.stream)
 
       const latency = Date.now() - startTime
 
@@ -1148,7 +1330,7 @@ export class RequestForwarder {
       }
 
       if (response) {
-        this.applyToolCallsToResponse(response.data, transformed)
+        this.applyToolCallsToResponse(responseData, transformed)
         
         if (deleteChatCallback) {
           await deleteChatCallback(chatId)
@@ -1158,7 +1340,7 @@ export class RequestForwarder {
           success: true,
           status: response.status,
           headers: this.extractHeaders(response.headers),
-          body: response.data,
+          body: responseData,
           latency,
           providerSessionId: chatId,
         }
@@ -1200,7 +1382,7 @@ export class RequestForwarder {
       const adapter = new MimoAdapter(provider, account)
 
       const { response, conversationId, query } = await adapter.chatCompletion({
-        ...getConversationOptions(request),
+        ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.originalModel,
         messages: transformedRequest.messages as any,
@@ -1209,6 +1391,7 @@ export class RequestForwarder {
         reasoning_effort: transformedRequest.reasoning_effort,
         web_search: transformedRequest.web_search,
       })
+      const responseData = this.bindProbeCancellation(request, response.data)
 
       const latency = Date.now() - startTime
 
@@ -1237,10 +1420,10 @@ export class RequestForwarder {
 
       if (request.stream) {
         const transformedStream = new PassThrough()
-        const openAIStream = handler.handleStream(response.data)
+        const openAIStream = handler.handleStream(responseData)
         transformedStream.once('close', () => {
           if (!transformedStream.readableEnded) {
-            response.data.destroy?.()
+            responseData.destroy?.()
             openAIStream.destroy()
           }
         })
@@ -1250,7 +1433,7 @@ export class RequestForwarder {
             for await (const chunk of openAIStream) {
               transformedStream.write(chunk)
             }
-            if (!getConversationOptions(request).conversation) {
+            if (!accountProbeRequests.has(request) && !getForwardConversationOptions(request).conversation) {
               await adapter.generateConversationTitle(
                 conversationId,
                 query,
@@ -1278,10 +1461,10 @@ export class RequestForwarder {
         }
       }
 
-      const result = await handler.handleNonStream(response.data)
+      const result = await handler.handleNonStream(responseData)
       const parsedResult = JSON.parse(result)
       this.applyToolCallsToResponse(parsedResult, transformed)
-      if (!getConversationOptions(request).conversation) {
+      if (!accountProbeRequests.has(request) && !getForwardConversationOptions(request).conversation) {
         await adapter.generateConversationTitle(
           conversationId,
           query,
@@ -1330,13 +1513,14 @@ export class RequestForwarder {
       const adapter = new PerplexityAdapter(provider, account)
       
       const { stream, sessionId } = await adapter.chatCompletion({
-        ...getConversationOptions(request),
+        ...getForwardConversationOptions(request),
         model: actualModel,
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
         reasoning_effort: request.reasoning_effort,
       })
+      const responseData = this.bindProbeCancellation(request, stream)
 
       const latency = Date.now() - startTime
 
@@ -1353,7 +1537,7 @@ export class RequestForwarder {
 
         const handler = new PerplexityStreamHandler(actualModel, sessionId, deleteSessionCallback, adapter)
         attachConversationListener(request, handler)
-        const transformedStream = await handler.handleStream(stream)
+        const transformedStream = await handler.handleStream(responseData)
         
         return {
           success: true,
@@ -1368,7 +1552,7 @@ export class RequestForwarder {
 
       const handler = new PerplexityStreamHandler(actualModel, sessionId, undefined, adapter)
       attachConversationListener(request, handler)
-      const result = await handler.handleNonStream(stream)
+      const result = await handler.handleNonStream(responseData)
       
       this.applyToolCallsToResponse(result, transformed)
       

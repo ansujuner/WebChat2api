@@ -5,12 +5,14 @@
 
 Current account controls: [manual enable/disable, DeepSeek suspension recovery and Arena model quotas](docs/account-scheduling.md). Provider logos use documented official website assets; see [asset sources](THIRD_PARTY_ASSETS.md).
 
+New in v1.5.1: [real-message liveness checks for one account, one provider or all accounts](docs/account-liveness.md), with exact account binding and no retry/failover.
+
 <p align="center">
   <img src="build/icons.png" alt="Chat2API Logo" width="128" height="128">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.5.0-blue?style=flat-square&logo=github" alt="Release">
+  <img src="https://img.shields.io/badge/Version-v1.5.1-blue?style=flat-square&logo=github" alt="Release">
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License">
   <br>
   <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/Electron-44.2.0-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron"></a>

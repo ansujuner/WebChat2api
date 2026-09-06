@@ -103,6 +103,8 @@ export interface Account {
   providerUserId?: string
   /** Credential data (encrypted storage) */
   credentials: Record<string, string>
+  /** Internal user credential replacement revision; trusted provider rotation preserves it. Legacy is zero. */
+  credentialRevision?: number
   /** Account status */
   status: AccountStatus
   /** Manual scheduling switch; old records default to enabled, independent of auth status. */

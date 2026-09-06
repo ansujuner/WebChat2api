@@ -121,6 +121,7 @@ export class GLMAdapter {
   }
 
   private async acquireToken(): Promise<string> {
+    const expectedCredentials = { ...this.account.credentials }
     const refreshToken = this.getRefreshToken()
     const cached = tokenCache.get(refreshToken)
     if (cached && Date.now() < cached.expiresAt) {
@@ -155,23 +156,24 @@ export class GLMAdapter {
       throw new Error(`Token refresh failed: ${errorMsg}`)
     }
 
-    const { access_token, refresh_token } = response.data.result
+    const { access_token, refresh_token } = response.data.result || {}
+    if (typeof access_token !== 'string' || !access_token.trim() || typeof refresh_token !== 'string' || !refresh_token.trim()) {
+      throw new Error('GLM returned an invalid token refresh response')
+    }
     const tokenInfo: TokenInfo = {
       accessToken: access_token,
       refreshToken: refresh_token,
       expiresAt: Date.now() + ACCESS_TOKEN_EXPIRES * 1000,
     }
-    tokenCache.set(refreshToken, tokenInfo)
-
     if (refresh_token !== refreshToken) {
       console.log('[GLM] Token updated, saving new token')
-      const decryptedCredentials = {
-        refresh_token,
-      }
-      await storeManager.updateAccount(this.account.id, {
-        credentials: decryptedCredentials,
-      })
+      const updated = storeManager.rotateAccountCredentials(this.account.id, expectedCredentials, { refresh_token })
+      if (!updated) throw new Error('Account credentials changed during token refresh; no chat was submitted')
+      this.account = updated
     }
+
+    tokenCache.set(refreshToken, tokenInfo)
+    tokenCache.set(refresh_token, tokenInfo)
 
     console.log('[GLM] Token refresh successful')
     return access_token

@@ -31,8 +31,66 @@ import type { Provider, Account, ProxyStatus, ProviderCheckResult, OAuthResult, 
 import type { SystemPrompt, SessionConfig, SessionRecord, ManagementApiConfig } from '../store/types'
 import { DEFAULT_CONFIG } from '../store/types'
 import type { ProviderType } from '../oauth/types'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import type { AccountLivenessJob } from '../../shared/accountLiveness'
 
 const updaterManager = UpdaterManager.getInstance()
+
+let livenessRegistration: Promise<void> | undefined
+
+function isLivenessAppWindow(window: BrowserWindow): boolean {
+  try {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) return false
+    const actual = new URL(window.webContents.getURL())
+    if (process.env.NODE_ENV === 'development') {
+      const expected = new URL(process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173')
+      return ['http:', 'https:'].includes(expected.protocol) && actual.origin === expected.origin
+    }
+    const expected = pathToFileURL(join(__dirname, '../renderer/index.html'))
+    actual.hash = ''; actual.search = ''
+    return actual.href === expected.href
+  } catch { return false }
+}
+
+/** One app-wide job subscription; never attach job events to remote OAuth windows. */
+export async function registerAccountLivenessHandlers(): Promise<void> {
+  if (livenessRegistration) return livenessRegistration
+  livenessRegistration = (async () => {
+    const backend = await import('../diagnostics/accountLiveness')
+    const assertSender = (event: Electron.IpcMainInvokeEvent) => {
+      const owner = BrowserWindow.getAllWindows().find(window => !window.isDestroyed() && window.webContents === event.sender)
+      if (!owner || !isLivenessAppWindow(owner) || event.sender.isDestroyed() || !event.senderFrame
+        || event.senderFrame !== event.sender.mainFrame) throw new Error('Account liveness is available only in the main application window.')
+    }
+    const safeInvoke = async <T>(event: Electron.IpcMainInvokeEvent, operation: () => T | Promise<T>): Promise<T> => {
+      assertSender(event)
+      let result: T
+      try { result = await operation() }
+      catch (error) {
+        if (error instanceof backend.AccountLivenessError) throw new Error(error.message)
+        throw new Error('Account liveness request failed. Check the account selection and try again.')
+      }
+      assertSender(event)
+      return result
+    }
+    const unsubscribe = await backend.subscribeAccountLiveness(job => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        try {
+          if (isLivenessAppWindow(window)) window.webContents.send(IpcChannels.ACCOUNTS_LIVENESS_CHANGED, job)
+        } catch { /* A window may close between the liveness checks and send. Other app windows still receive updates. */ }
+      }
+    })
+    ipcMain.handle(IpcChannels.ACCOUNTS_LIVENESS_START, (event, input: unknown): Promise<AccountLivenessJob> =>
+      safeInvoke(event, () => backend.startAccountLiveness(input)))
+    ipcMain.handle(IpcChannels.ACCOUNTS_LIVENESS_GET, (event): Promise<AccountLivenessJob | null> =>
+      safeInvoke(event, () => backend.getAccountLiveness()))
+    ipcMain.handle(IpcChannels.ACCOUNTS_LIVENESS_CANCEL, (event, jobId: unknown): Promise<AccountLivenessJob | null> =>
+      safeInvoke(event, () => backend.cancelAccountLiveness(jobId)))
+    app.once('will-quit', () => unsubscribe())
+  })()
+  return livenessRegistration
+}
 
 const clearChatsHandlers: Record<string, (provider: Provider, account: Account) => Promise<boolean>> = {
   kimi: async (provider, account) => new KimiAdapter(provider, account).deleteAllChats(),
@@ -88,6 +146,8 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   if (config.autoStartProxy) {
     await startProxyService()
   }
+
+  await registerAccountLivenessHandlers()
 
   ipcMain.handle(IpcChannels.PROXY_START, async (_, port?: number): Promise<boolean> => startProxyService(port))
   ipcMain.handle(IpcChannels.PROXY_STOP, async (): Promise<boolean> => stopProxyService())

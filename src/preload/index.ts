@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IpcChannels } from '../main/ipc/channels'
+import type { AccountLivenessInput, AccountLivenessJob } from '../shared/accountLiveness'
 import type { 
   Provider, 
   Account, 
@@ -161,6 +162,18 @@ const accountsAPI = {
     const listener = () => callback()
     ipcRenderer.on(IpcChannels.ACCOUNTS_CHANGED, listener)
     return () => ipcRenderer.removeListener(IpcChannels.ACCOUNTS_CHANGED, listener)
+  },
+
+  livenessStart: (input: AccountLivenessInput): Promise<AccountLivenessJob> =>
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_LIVENESS_START, input),
+  livenessGet: (): Promise<AccountLivenessJob | null> =>
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_LIVENESS_GET),
+  livenessCancel: (jobId: string): Promise<AccountLivenessJob | null> =>
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_LIVENESS_CANCEL, jobId),
+  onLivenessChanged: (callback: (job: AccountLivenessJob) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, job: AccountLivenessJob) => callback(job)
+    ipcRenderer.on(IpcChannels.ACCOUNTS_LIVENESS_CHANGED, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.ACCOUNTS_LIVENESS_CHANGED, listener)
   },
   
   delete: (id: string): Promise<boolean> => 

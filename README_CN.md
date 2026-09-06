@@ -5,12 +5,14 @@
 
 当前账号功能：[独立启停、DeepSeek 封禁自动恢复与 Arena 模型限额](docs/account-scheduling.md)。供应商品牌图标已更换为有记录的官网资源，详见 [图标来源](THIRD_PARTY_ASSETS.md)。
 
+v1.5.1 新增：[单账号、供应商批量与全部账号真实测活](docs/account-liveness.md)，发送一条简短消息检查正常返回，不经轮询换号。
+
 <p align="center">
   <img src="build/icons.png" alt="Chat2API Logo" width="128" height="128">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.5.0-blue?style=flat-square&logo=github" alt="Release">
+  <img src="https://img.shields.io/badge/Version-v1.5.1-blue?style=flat-square&logo=github" alt="Release">
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License">
   <br>
   <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/Electron-44.2.0-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron"></a>

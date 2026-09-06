@@ -7,6 +7,11 @@ The original copyright and **GPL-3.0-or-later** grant are retained in
 
 ## Changes from the supplied project
 
+- v1.5.1 (2026-09-06): added exact-account real-message liveness checks,
+  serial provider/all-account batches, cancellation of queued checks, safe
+  progress reports and independent credential-validation controls. See
+  [account liveness](docs/account-liveness.md).
+
 - Updated provider mappings and browser/runtime compatibility.
 - Reused upstream website conversations; only the new turn is submitted.
 - Added Claude Code/Anthropic compatibility and repaired tool-call testing,
