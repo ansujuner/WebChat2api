@@ -7,7 +7,7 @@ import { AccountManager } from '../store/accounts'
 import { ProviderChecker } from '../providers/checker'
 import { syncArenaProviderModels } from '../providers/arenaIntegration'
 import { CustomProviderManager } from '../providers/custom'
-import { reauthenticateAccount, clearAccountReauthentication } from '../oauth/accountReauthentication'
+import { reauthenticateAccount, captureAccountBrowserCleanup } from '../oauth/accountReauthentication'
 import { getBuiltinProviders, getBuiltinProvider } from '../providers/builtin'
 import { oauthManager } from '../oauth/manager'
 import { proxyServer } from '../proxy/server'
@@ -300,9 +300,9 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   })
 
   ipcMain.handle(IpcChannels.PROVIDERS_DELETE, async (_, id: string): Promise<boolean> => {
-    const accountIds = AccountManager.getByProviderId(id).map(account => account.id)
+    const cleanup = AccountManager.getByProviderId(id).map(account => captureAccountBrowserCleanup(account.id))
     const deleted = CustomProviderManager.delete(id)
-    if (deleted) await Promise.all(accountIds.map(accountId => clearAccountReauthentication(accountId)))
+    if (deleted) await Promise.all(cleanup.map(close => close()))
     return deleted
   })
 
@@ -621,8 +621,9 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   })
 
   ipcMain.handle(IpcChannels.ACCOUNTS_DELETE, async (_, id: string): Promise<boolean> => {
+    const cleanup = captureAccountBrowserCleanup(id)
     const deleted = AccountManager.delete(id)
-    if (deleted) await clearAccountReauthentication(id)
+    if (deleted) await cleanup()
     return deleted
   })
 

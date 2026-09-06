@@ -3,6 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
+const { installLauncherSecurityFixture } = require('./helpers/local-launch-fixture.cjs')
 
 const root = path.resolve(__dirname, '../..')
 const fixtureParent = path.join(root, 'logs', 'runtime-update-tests')
@@ -20,6 +21,7 @@ function fixture(t, options = {}) {
   for (const script of ['update-runtime.ps1', 'start-local.ps1']) {
     write(`scripts/${script}`, fs.readFileSync(path.join(root, 'scripts', script)))
   }
+  installLauncherSecurityFixture(root, dir)
   write('package.json', JSON.stringify({ devDependencies: { electron: options.pin ?? '44.2.0' } }))
   write('package-lock.json', JSON.stringify({ packages: { 'node_modules/electron': { version: options.lock ?? '44.2.0' } } }))
   write('node_modules/electron/dist/electron.exe', 'fixture only: never executable')

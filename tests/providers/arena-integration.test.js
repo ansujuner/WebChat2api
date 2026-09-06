@@ -40,7 +40,7 @@ async function integrationFixture(overrides = {}) {
     ...overrides,
   }
   const module = load('src/main/providers/arenaIntegration.ts', {
-    '../arena/browserManager': { arenaBrowserManager: browser }, './arenaCatalog': await catalogPromise,
+    '../arena/browserManager': { arenaBrowserManager: browser, ArenaBrowserFailure: class extends Error { constructor(errorCode) { super('Browser not ready'); this.errorCode = errorCode } } }, './arenaCatalog': await catalogPromise,
     '../store/store': { storeManager: {
       getAccountsByProviderId(id, secrets) { calls.push(['accounts', id, secrets]); return [{ status: 'active', credentials: { browserProfileId: profileId } }] },
       ensureProviderExists: id => calls.push(['ensure', id]), updateProvider: (id, value) => writes.push([id, value]),
@@ -109,14 +109,39 @@ async function adapterFixture(overrides = {}) {
     cancel() {}, cancelAndWait: async () => {}, ...overrides,
   })
   const calls = []
+  class ArenaBrowserFailure extends Error { constructor(errorCode) { super('Safe browser failure'); this.errorCode = errorCode } }
   class BaseOAuthAdapter { constructor(config) { this.config = config } emitProgress(...args) { calls.push(['progress', ...args]) } }
   const { ArenaAdapter } = load('src/main/oauth/adapters/arena.ts', {
-    './base': { BaseOAuthAdapter }, '../../arena/browserManager': { arenaBrowserManager: browser },
+    './base': { BaseOAuthAdapter }, '../../arena/browserManager': { arenaBrowserManager: browser, ArenaBrowserFailure },
     '../../providers/arenaCatalog': await catalogPromise,
     '../../providers/arenaIntegration': { syncArenaProviderModels: async (id, signal) => { signal.throwIfAborted(); calls.push(['sync', id]) } },
   })
-  return { adapter: new ArenaAdapter({ providerId: 'arena' }), browser, calls }
+  return { adapter: new ArenaAdapter({ providerId: 'arena' }), browser, calls, ArenaBrowserFailure }
 }
+
+test('Arena login and readiness preserve safe infrastructure errors without falsely reporting sign-out', async () => {
+  for (const errorCode of ['profile_unavailable', 'browser_not_found', 'browser_start_failed', 'browser_connection_failed', 'page_not_ready']) {
+    const f = await adapterFixture({ startLogin: async () => ({ success: false, errorCode }),
+      status: async () => ({ authenticated: false, ready: false, errorCode }) })
+    const result = await f.adapter.startLogin({ providerId: 'arena' })
+    assert.equal(result.errorCode, errorCode)
+    assert.deepEqual(f.calls, [])
+    const validation = await f.adapter.validateToken({ browserProfileId: profileId })
+    assert.equal(validation.valid, false)
+    assert.equal(validation.errorCode, errorCode)
+    assert.match(validation.error, /does not mean/)
+    f.browser.startLogin = async () => { throw new f.ArenaBrowserFailure(errorCode) }
+    assert.equal((await f.adapter.startLogin({ providerId: 'arena' })).errorCode, errorCode)
+  }
+})
+
+test('Arena catalog preserves infrastructure failure instead of misdiagnosing an expired login', async () => {
+  for (const errorCode of ['profile_unavailable', 'browser_not_found', 'browser_start_failed', 'browser_connection_failed', 'page_not_ready']) {
+    const f = await integrationFixture({ status: async () => ({ authenticated: false, ready: false, errorCode }) })
+    await assert.rejects(f.syncArenaProviderModels(profileId), error => error.errorCode === errorCode)
+    assert.deepEqual(f.writes, [])
+  }
+})
 test('Arena OAuth returns only profile ID and verified identity after live catalog synchronization', async () => {
   const f = await adapterFixture()
   const result = await f.adapter.startLogin({ providerId: 'arena' })

@@ -7,6 +7,14 @@ The original copyright and **GPL-3.0-or-later** grant are retained in
 
 ## Changes from the supplied project
 
+- v1.6.6 (2026-09-06): fixed installed-browser login startup from an elevated
+  Windows launcher by delegating to the existing ordinary-user desktop shell,
+  without weakening browser sandboxing or disabling Chrome's de-elevation.
+  Added safe, translated login-stage errors and retained Arena browser ownership
+  after disconnected pipes so a live profile cannot be launched twice. Added
+  explicit original-account Arena restoration diagnostics; no new profile is
+  substituted when the original cannot be restored.
+
 - v1.6.5 (2026-09-06): added direct account-bound re-login for all built-in
   providers, including reuse of Arena's original browser profile, identity
   checks and atomic updates that preserve account controls. Added per-provider

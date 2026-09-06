@@ -46,6 +46,8 @@ interface LoginAttempt {
   poll: NodeJS.Timeout | null
   timer: NodeJS.Timeout | null
   checking: boolean
+  launchFailureCode: 'profile_unavailable' | 'browser_start_failed' | 'browser_connection_failed'
+  browserReady: boolean
   launch: Promise<void>
   completion: Promise<InAppLoginResult>
   resolve: (result: InAppLoginResult) => void
@@ -61,8 +63,8 @@ export class ExternalBrowserLoginManager extends EventEmitter {
   private attempt: LoginAttempt | null = null
 
   async startLogin(options: InAppLoginOptions): Promise<InAppLoginResult> {
-    if (this.attempt) return { success: false, error: 'A login process is already in progress' }
-    if (options.providerType !== 'deepseek') return { success: false, error: 'System-browser automatic login currently supports DeepSeek only.' }
+    if (this.attempt) return { success: false, errorCode: 'busy', error: 'A login process is already in progress' }
+    if (options.providerType !== 'deepseek') return { success: false, errorCode: 'unsupported_provider', error: 'System-browser automatic login currently supports DeepSeek only.' }
     if (options.proxyMode !== undefined && !['system', 'none'].includes(options.proxyMode)) return { success: false, error: 'Invalid login proxy mode.' }
     if (options.timeout !== undefined && (!Number.isFinite(options.timeout) || options.timeout < 1000 || options.timeout > 1800000)) return { success: false, error: 'Login timeout must be between 1 second and 30 minutes.' }
     let proxyConfig: ProviderProxyConfig
@@ -71,11 +73,15 @@ export class ExternalBrowserLoginManager extends EventEmitter {
     let resolve!: LoginAttempt['resolve']
     const result = new Promise<InAppLoginResult>(done => { resolve = done })
     const attempt: LoginAttempt = { controller: new AbortController(), closing: false, started: Date.now(), profileRoot: null, profile: null, browser: null, child: null,
-      exited: false, exitPromise: null, pipe: null, poll: null, timer: null, checking: false, launch: Promise.resolve(), completion: result, resolve }
+      exited: false, exitPromise: null, pipe: null, poll: null, timer: null, checking: false,
+      launchFailureCode: 'profile_unavailable', browserReady: false, launch: Promise.resolve(), completion: result, resolve }
     this.attempt = attempt
-    attempt.timer = setTimeout(() => this.finish(attempt, { success: false, error: 'Login timeout. Please retry when ready to sign in.' }), options.timeout ?? DEFAULT_TIMEOUT)
+    attempt.timer = setTimeout(() => this.finish(attempt, { success: false, errorCode: 'timeout', error: 'Login timeout. Please retry when ready to sign in.' }), options.timeout ?? DEFAULT_TIMEOUT)
     attempt.launch = this.launch(attempt, { ...options, proxyConfig }).catch(() => {
-      this.finish(attempt, { success: false, error: 'The isolated browser could not be started. Check Chrome/Edge installation and local security settings, or use manual token import.' })
+      this.finish(attempt, { success: false, errorCode: attempt.launchFailureCode,
+        error: attempt.launchFailureCode === 'profile_unavailable' ? 'The isolated login profile could not be prepared safely.'
+          : attempt.launchFailureCode === 'browser_connection_failed' ? 'The private login browser connection could not be established.'
+          : 'The isolated browser could not be started. Check Chrome/Edge installation and local security settings, or use manual token import.' })
     })
     this.emit('status', { status: 'pending', message: 'Opening an isolated Chrome/Edge login window. Your usual browser profile will not be read.' })
     return result
@@ -85,7 +91,7 @@ export class ExternalBrowserLoginManager extends EventEmitter {
 
   private async launch(attempt: LoginAttempt, options: InAppLoginOptions): Promise<void> {
     try { attempt.browser = await findInstalledLoginBrowser(attempt.controller.signal) } catch {
-      this.finish(attempt, { success: false, error: 'No verified Chrome or Edge is available for automatic login. Install or repair the official browser, or use manual token import.' })
+      this.finish(attempt, { success: false, errorCode: 'browser_not_found', error: 'No verified Chrome or Edge is available for automatic login. Install or repair the official browser, or use manual token import.' })
       return
     }
     if (!this.current(attempt)) return
@@ -101,30 +107,33 @@ export class ExternalBrowserLoginManager extends EventEmitter {
     const profileReal = await realpath(attempt.profile)
     if (profileReal !== path.resolve(attempt.profile) || path.dirname(profileReal) !== attempt.profileRoot) throw new Error('The isolated profile path changed before launch.')
     if (!this.current(attempt)) return
+    attempt.launchFailureCode = 'browser_start_failed'
     const child = spawn(attempt.browser.executable, loginBrowserArguments(attempt.profile, options.proxyConfig ?? options.proxyMode ?? getProviderProxyConfig(options.providerId)), {
       shell: false, windowsHide: false, detached: false,
       // Chromium reads FD 3 and writes FD 4. No stderr/stdout logs containing page data are captured.
       stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], env: browserChildEnvironment(),
     })
     attempt.child = child
+    attempt.launchFailureCode = 'browser_connection_failed'
     attempt.exitPromise = new Promise(done => {
       const exited = (): void => { attempt.exited = true; done() }
       child.once('exit', exited)
       child.once('error', exited)
     })
-    child.once('error', () => this.finish(attempt, { success: false, error: 'The login browser could not be started. Check your installed browser or use manual import.' }))
-    child.once('exit', () => this.finish(attempt, { success: false, error: 'Login browser was closed.' }))
+    child.once('error', () => this.finish(attempt, { success: false, errorCode: 'browser_start_failed', error: 'The login browser could not be started. Check your installed browser or use manual import.' }))
+    child.once('exit', () => this.finish(attempt, { success: false, errorCode: attempt.browserReady ? 'cancelled' : 'browser_connection_failed', error: 'Login browser was closed.' }))
     const input = child.stdio[3] as Writable | null
     const output = child.stdio[4] as Readable | null
     if (!input || !output) throw new Error('Private browser pipes are unavailable.')
     const pipe = new CdpPipe(input, output)
     attempt.pipe = pipe
     pipe.once('close', () => {
-      if (this.current(attempt)) this.finish(attempt, { success: false, error: 'The private login browser connection was closed. Please retry or use manual import.' })
+      if (this.current(attempt)) this.finish(attempt, { success: false, errorCode: 'browser_connection_failed', error: 'The private login browser connection was closed. Please retry or use manual import.' })
     })
     // Wait for browser readiness without evaluating or altering any page.
     await pipe.send('Browser.getVersion', {}, undefined, 15000)
     if (!this.current(attempt)) return
+    attempt.browserReady = true
     this.emit('status', { status: 'pending', message: `Please sign in normally in the new ${attempt.browser.name} window. Only the DeepSeek login token will be imported after validation.` })
     attempt.poll = setInterval(() => { void this.checkTokens(attempt) }, 1500)
     void this.checkTokens(attempt)
@@ -234,7 +243,7 @@ export class ExternalBrowserLoginManager extends EventEmitter {
     } else await remove()
   }
 
-  cancel(): void { if (this.attempt) this.finish(this.attempt, { success: false, error: 'Login cancelled by user.' }) }
+  cancel(): void { if (this.attempt) this.finish(this.attempt, { success: false, errorCode: 'cancelled', error: 'Login cancelled by user.' }) }
 
   /** App shutdown may await cleanup for at most 10 seconds; slow resources remain ownership-guarded. */
   async cancelAndWait(): Promise<void> {

@@ -1,5 +1,6 @@
 import type { LegacyToolPromptConfig, ToolCallingConfig } from './toolCalling'
 import type { ProviderNetworkProxyMode } from './providerNetwork'
+import type { AccountReauthenticationErrorCode } from './accountReauthentication'
 
 export type AccountStatus = 'active' | 'inactive' | 'expired' | 'error'
 
@@ -187,6 +188,7 @@ export interface ProviderCheckResult {
 
 export interface OAuthResult {
   success: boolean
+  errorCode?: AccountReauthenticationErrorCode
   providerId?: string
   providerType?: ProviderVendor
   credentials?: Record<string, string>

@@ -171,6 +171,7 @@ function browserFixture(options = {}) {
         return {}
       }
       if (method === 'Browser.getVersion') {
+        if (options.handshakeError) throw new Error('private handshake exception must not leak')
         if (options.readiness) await Promise.race([options.readiness.promise, this.whenClosed])
         if (this.closed) throw new Error('connection is closed')
         return { userAgent: 'Mozilla/5.0 Chrome/152.0.0.0 Safari/537.36' }
@@ -203,6 +204,7 @@ function browserFixture(options = {}) {
       async rm(value, config) { removed.push({ value, config, exited: children.at(-1)?.didExit ?? true }) },
     },
     'node:child_process': { spawn(executable, args, config) {
+      if (options.spawnError) throw new Error('private spawn exception must not leak')
       const child = new EventEmitter()
       child.stdio = [null, null, null, new PassThrough(), new PassThrough()]
       child.kill = () => { throw new Error('No browser process kills permitted') }
@@ -374,11 +376,38 @@ test('browser crash or spawn error completes once and prevents stale success', a
     f.children[0].emit(event, event === 'error' ? new Error('private spawn error must not leak') : 1)
     const value = await result
     assert.equal(value.success, false)
+    assert.equal(value.errorCode, event === 'error' ? 'browser_start_failed' : 'cancelled')
     assert.ok(!value.error.includes('private'))
     f.manager.completeWithSuccess({ userToken: 'late-fixture-token' })
     assert.equal(completes.length, 1)
     assert.equal(f.removed.length, 1)
   }
+})
+
+test('external login retains exact safe discovery, profile, spawn and handshake stages', async () => {
+  for (const [options, expected] of [[{ missingBrowser: true }, 'browser_not_found'], [{ rootEscape: true }, 'profile_unavailable'],
+    [{ spawnError: true }, 'browser_start_failed'], [{ handshakeError: true }, 'browser_connection_failed']]) {
+    const f = browserFixture(options)
+    const result = await f.manager.startLogin(startOptions)
+    assert.equal(result.success, false)
+    assert.equal(result.errorCode, expected)
+    assert.doesNotMatch(JSON.stringify(result), /private-path|private spawn|private handshake|Program Files|mock-user-data/)
+    assert.equal(f.commands.filter(command => command.method === 'Runtime.evaluate').length, 0)
+    assert.equal(f.manager.isWindowOpen(), false)
+    assert.equal(f.timeouts.size, 0)
+  }
+})
+
+test('external browser exit before handshake is a connection failure, not a user cancellation', async () => {
+  const readiness = deferred(), f = browserFixture({ readiness })
+  const pending = f.manager.startLogin(startOptions)
+  await tick()
+  f.children[0].emit('exit', 1)
+  const result = await pending
+  assert.equal(result.errorCode, 'browser_connection_failed')
+  assert.equal(f.manager.isWindowOpen(), false)
+  assert.equal(f.commands.filter(command => command.method === 'Runtime.evaluate').length, 0)
+  readiness.resolve()
 })
 
 test('timeout and late token response cannot report success after cancelled attempt', async () => {

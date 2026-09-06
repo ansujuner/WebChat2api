@@ -34,7 +34,7 @@ function load(relative, overrides = {}, globals = {}) {
 const policy = load('src/main/oauth/loginPolicy.ts')
 const configs = load('src/main/oauth/tokenExtractionConfig.ts')
 
-function browserFixture({ proxy, loadError } = {}) {
+function browserFixture({ proxy, loadError, sessionError, windowError } = {}) {
   const windows = [], sessions = [], order = [], timeouts = new Map(), intervals = new Map()
   let now = 1000, nextTimer = 0
   class Clock extends Date { static now() { return now } }
@@ -50,13 +50,14 @@ function browserFixture({ proxy, loadError } = {}) {
     }
   }
   class Window extends EventEmitter {
-    constructor(options) { super(); this.options = options; this.webContents = new Contents(); this.destroyed = false; windows.push(this); order.push('window') }
+    constructor(options) { super(); if (windowError) throw windowError; this.options = options; this.webContents = new Contents(); this.destroyed = false; windows.push(this); order.push('window') }
     async loadURL(url) { order.push('navigate'); assert.equal(typeof this.options.webPreferences.session.interceptor, 'function'); this.webContents.url = url; if (loadError) throw loadError }
     isDestroyed() { return this.destroyed }
     show() { this.shown = true }
     destroy() { this.destroyed = true; this.emit('closed') }
   }
   const electron = { BrowserWindow: Window, session: { fromPartition(partition) {
+    if (sessionError) throw sessionError
     const cookies = new EventEmitter()
     const result = { partition, cookieValues: [], cookies,
       webRequest: { onBeforeSendHeaders(fn) { result.interceptor = fn; order.push(fn ? 'interception' : 'unhook') } },
@@ -168,6 +169,7 @@ test('login proxy setup failure returns safe error without page navigation or ra
   proxy.reject(Object.assign(new Error('http://user:SECRET@proxy.test'), { code: 'ERR_PROXY_CONNECTION_FAILED' }))
   const response = await result
   assert.equal(response.success, false)
+  assert.equal(response.errorCode, 'network_error')
   assert.match(response.error, /proxy/)
   assert.doesNotMatch(response.error, /SECRET/)
   assert.equal(f.windows.length, 0)
@@ -301,6 +303,7 @@ function oauthFixture(validateToken) {
       flow.resolve({ success: true, credentials })
     }
     browser.cancel = () => { const flow = pending; pending = null; flow?.resolve({ success: false, error: 'cancelled' }) }
+    browser.fail = result => { const flow = pending; pending = null; flow.resolve(result) }
     browser.destroy = browser.cancel
     return browser
   }
@@ -385,11 +388,48 @@ test('external DeepSeek startup failure does not fall back to the blocked embedd
   f.external.startLogin = async () => { throw new Error('private browser startup fixture') }
   const response = await f.manager.startInAppLogin('deepseek', 'deepseek')
   assert.equal(response.success, false)
+  assert.equal(response.errorCode, 'browser_error')
   assert.doesNotMatch(response.error, /private browser startup/)
   assert.equal(f.embedded.starts.length, 0)
   assert.equal(f.external.listenerCount('tokenFound'), 0)
   assert.equal(f.external.listenerCount('status'), 0)
   assert.equal(f.manager.getStatus(), 'idle')
+})
+
+test('embedded login classifies session, window, page-load and renderer failures without raw diagnostics', async () => {
+  const secret = new Error('private cookie / local path must not leak')
+  for (const [options, expected] of [[{ sessionError: secret }, 'profile_unavailable'], [{ windowError: secret }, 'browser_start_failed'],
+    [{ loadError: Object.assign(new Error(secret.message), { code: 'ERR_NAME_NOT_RESOLVED' }) }, 'page_not_ready']]) {
+    const f = browserFixture(options)
+    const result = await f.manager.startLogin({ providerId: 'kimi', providerType: 'kimi' })
+    assert.equal(result.errorCode, expected)
+    assert.doesNotMatch(JSON.stringify(result), /private cookie|local path/)
+    assert.equal(f.manager.isWindowOpen(), false)
+    assert.equal(f.timeouts.size, 0)
+  }
+  const f = browserFixture()
+  const pending = f.manager.startLogin({ providerId: 'kimi', providerType: 'kimi' })
+  await tick()
+  f.windows[0].webContents.emit('render-process-gone', { reason: secret.message })
+  assert.equal((await pending).errorCode, 'browser_connection_failed')
+})
+
+test('OAuth manager propagates only allowlisted browser failure codes for native and embedded flows', async () => {
+  for (const providerType of ['deepseek', 'kimi']) {
+    for (const errorCode of ['profile_unavailable', 'browser_not_found', 'browser_start_failed', 'browser_connection_failed', 'page_not_ready', 'network_error', 'timeout', 'cancelled', 'private-cookie-code']) {
+      let validations = 0
+      const f = oauthFixture(async () => { validations++; return { valid: true } })
+      const pending = f.manager.startInAppLogin(providerType, providerType)
+      f.browser.fail({ success: false, errorCode, error: 'private upstream cookie must not escape', credentials: { token: 'private token' }, accountInfo: { email: 'private@example.test' } })
+      const result = await pending
+      assert.equal(result.errorCode, errorCode === 'private-cookie-code' ? 'browser_error' : errorCode)
+      assert.equal(result.success, false)
+      assert.doesNotMatch(JSON.stringify(result), /private|credentials|accountInfo/)
+      assert.equal(validations, 0)
+      assert.equal(f.browser.listenerCount('tokenFound'), 0)
+      assert.equal(f.browser.listenerCount('status'), 0)
+    }
+  }
 })
 
 test('OAuth manager preserves only successfully validated account identity and never logs tokens', async () => {

@@ -1,4 +1,5 @@
 import { providerIcons } from '@/lib/providerIcons'
+import { newLoginFailureKey } from '@/lib/loginFailure'
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -146,6 +147,9 @@ export function AddProviderDialog({
   const [activeTab, setActiveTab] = useState<string>('manual')
   const [credentials, setCredentials] = useState<Record<string, string>>({})
   const credentialRevision = useRef(0)
+  const oauthAttempt = useRef<object | null>(null)
+  const oauthContext = useRef({ open, selectedProvider, step })
+  oauthContext.current = { open, selectedProvider, step }
   const [isValidating, setIsValidating] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isOAuthLoading, setIsOAuthLoading] = useState(false)
@@ -205,6 +209,12 @@ export function AddProviderDialog({
 
   const supportsOAuth = selectedProviderData && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'arena'].includes(selectedProviderData.id)
 
+  useEffect(() => {
+    oauthAttempt.current = null
+    setIsOAuthLoading(false)
+    return () => { oauthAttempt.current = null }
+  }, [open, selectedProvider, step])
+
   const toggleModelExpansion = (providerId: string) => {
     setExpandedModels(prev => {
       const newSet = new Set(prev)
@@ -235,6 +245,7 @@ export function AddProviderDialog({
   }, [open])
 
   const handleCredentialChange = (fieldName: string, value: string) => {
+    if (oauthAttempt.current) return
     credentialRevision.current += 1
     setCredentials(prev => ({
       ...prev,
@@ -244,7 +255,7 @@ export function AddProviderDialog({
   }
 
   const handleValidate = async () => {
-    if (!selectedProviderData || !onValidateToken) return
+    if (!selectedProviderData || !onValidateToken || oauthAttempt.current) return
 
     const credentialFields = selectedProviderData.credentialFields || []
     const requiredFields = credentialFields.filter(f => f.required)
@@ -277,6 +288,7 @@ export function AddProviderDialog({
   }
 
   const handleSubmit = async () => {
+    if (oauthAttempt.current) return
     if (selectedProviderData?.id === 'arena' && !validationResult.valid) return
     if (!selectedProviderData) return
 
@@ -313,42 +325,39 @@ export function AddProviderDialog({
   }
 
   const handleOpenOAuthBrowser = async () => {
-    if (!selectedProviderData) return
+    if (!open || !selectedProviderData || oauthAttempt.current || isValidating || isSubmitting) return
+    const attempt = {}
+    const providerId = selectedProviderData.id
+    const revision = credentialRevision.current
+    oauthAttempt.current = attempt
+    const current = () => oauthAttempt.current === attempt && oauthContext.current.open
+      && oauthContext.current.selectedProvider === providerId && oauthContext.current.step === 2
+      && credentialRevision.current === revision
     
     setIsOAuthLoading(true)
+    setValidationResult({})
     setOAuthStatus(t('providers.openingLoginWindow'))
     
     try {
-      console.log('[AddProviderDialog] Starting OAuth login for:', selectedProviderData.id)
-      
       const result = await window.electronAPI?.oauth.startInAppLogin(
         selectedProviderData.id,
         selectedProviderData.id as ProviderVendor
       )
-      
+      if (!current()) return
       
       if (result?.success && result.credentials) {
         
         const mappedCredentials = mapOAuthCredentials(selectedProviderData?.id, result.credentials)
+        if (!mappedCredentials || Array.isArray(mappedCredentials) || !Object.keys(mappedCredentials).length
+          || Object.values(mappedCredentials).some(value => typeof value !== 'string')
+          || selectedProviderData.credentialFields.some(field => field.required && !mappedCredentials[field.name]?.trim())
+          || (result.providerId && result.providerId !== providerId)) {
+          setOAuthStatus(t('providers.loginErrors.identity_unverified'))
+          return
+        }
         credentialRevision.current += 1
         
-        const hasAllRequiredFields = selectedProviderData.credentialFields
-          .filter(f => f.required)
-          .every(f => mappedCredentials[f.name])
-        
-        console.log('[AddProviderDialog] Has all required fields:', hasAllRequiredFields)
-        console.log('[AddProviderDialog] Required fields:', selectedProviderData.credentialFields.filter(f => f.required).map(f => f.name))
-        console.log('[AddProviderDialog] Mapped credentials keys:', Object.keys(mappedCredentials))
-        
-        if (!hasAllRequiredFields) {
-          console.error('[AddProviderDialog] Missing required fields!')
-          const missing = selectedProviderData.credentialFields
-            .filter(f => f.required && !mappedCredentials[f.name])
-            .map(f => f.name)
-          console.error('[AddProviderDialog] Missing:', missing)
-        }
-        
-        setCredentials(mappedCredentials)
+        setCredentials({ ...mappedCredentials })
         setOAuthStatus(t('providers.loginSuccess'))
         
         setValidationResult({
@@ -356,23 +365,12 @@ export function AddProviderDialog({
           userInfo: result.accountInfo
         })
       } else {
-        const errorMsg = result?.error || ''
-        console.error('[AddProviderDialog] OAuth failed:', errorMsg)
-        const translatedError = errorMsg === 'Login window was closed' 
-          ? t('providers.loginWindowClosed')
-          : errorMsg === 'A login window is already open'
-            ? t('providers.loginWindowAlreadyOpen')
-            : errorMsg.includes('Guest account') 
-              ? t('providers.guestAccountNotAllowed')
-              : errorMsg || t('providers.loginFailed')
-        setOAuthStatus(translatedError)
+        setOAuthStatus(t(newLoginFailureKey(result)))
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : t('providers.loginFailed')
-      console.error('[AddProviderDialog] OAuth error:', errorMessage)
-      setOAuthStatus(errorMessage)
+    } catch {
+      if (current()) setOAuthStatus(t('providers.loginFailed'))
     } finally {
-      setIsOAuthLoading(false)
+      if (oauthAttempt.current === attempt) { oauthAttempt.current = null; setIsOAuthLoading(false) }
     }
   }
 
@@ -780,7 +778,8 @@ export function AddProviderDialog({
                 </div>
                 <Button 
                   onClick={handleOpenOAuthBrowser}
-                  disabled={isOAuthLoading}
+                  disabled={isOAuthLoading || isValidating || isSubmitting}
+                  data-testid="provider-oauth-login"
                 >
                   {isOAuthLoading ? (
                     <>
@@ -795,7 +794,7 @@ export function AddProviderDialog({
                   )}
                 </Button>
                 {oauthStatus && !isOAuthLoading && (
-                  <p className={`text-sm ${validationResult.valid ? 'text-green-600' : 'text-red-500'}`}>
+                  <p role="status" aria-live="polite" className={`text-sm ${validationResult.valid ? 'text-green-600' : 'text-red-500'}`}>
                     {oauthStatus}
                   </p>
                 )}

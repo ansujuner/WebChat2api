@@ -303,7 +303,7 @@ export class OAuthManager extends EventEmitter {
     return withProviderNetwork(providerId, async () => {
     const loginManager = providerType === 'deepseek' ? externalBrowserLoginManager : inAppLoginManager
     if (this.inAppLoginPending || this.currentLogin || this.isInAppLoginOpen()) {
-      return { success: false, providerId, providerType, error: 'A login process is already in progress' }
+      return { success: false, providerId, providerType, errorCode: 'busy', error: 'A login process is already in progress' }
     }
     if (providerType === 'arena') return this.startLogin({ providerId, providerType, timeout })
     this.inAppLoginPending = true
@@ -392,9 +392,13 @@ export class OAuthManager extends EventEmitter {
         return { success: true, providerId, providerType, credentials: { ...result.credentials },
           ...(validatedAccountInfo ? { accountInfo: validatedAccountInfo } : {}) }
       }
-      return { success: false, providerId, providerType, error: result.error || 'Login failed' }
+      const allowedFailureCodes = ['profile_unavailable', 'browser_not_found', 'browser_start_failed', 'browser_connection_failed',
+        'page_not_ready', 'network_error', 'browser_error', 'busy', 'cancelled', 'timeout', 'unsupported_provider']
+      return { success: false, providerId, providerType,
+        errorCode: result.errorCode && allowedFailureCodes.includes(result.errorCode) ? result.errorCode : 'browser_error',
+        error: 'The login could not be completed. Check the account browser and try again.' }
     } catch {
-      return { success: false, providerId, providerType, error: 'The login flow could not be started. Please retry.' }
+      return { success: false, providerId, providerType, errorCode: 'browser_error', error: 'The login flow could not be started. Please retry.' }
     } finally {
       active = false
       this.inAppLoginPending = false

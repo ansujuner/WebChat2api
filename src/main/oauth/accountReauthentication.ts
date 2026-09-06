@@ -12,6 +12,7 @@ const arenaAccountProfiles = new Map<string, string>()
 const browserErrorCodes = new Set<AccountReauthenticationErrorCode>([
   'busy', 'cancelled', 'timeout', 'identity_mismatch', 'identity_unverified', 'login_required',
   'network_error', 'route_changed', 'browser_error', 'account_changed', 'invalid_account',
+  'profile_unavailable', 'browser_not_found', 'browser_start_failed', 'browser_connection_failed', 'page_not_ready',
 ])
 const failure = (accountId: string, errorCode: AccountReauthenticationErrorCode): AccountReauthenticationResult =>
   ({ success: false, accountId, state: 'failed', errorCode })
@@ -94,6 +95,7 @@ export async function reauthenticateAccount(input: unknown): Promise<AccountReau
       }
       const login = await oauthManager.startInAppLogin(provider.id, providerType, undefined, getProviderProxyConfig(provider.id))
       if (!login.success) {
+        if (login.errorCode && browserErrorCodes.has(login.errorCode)) return { success: false, errorCode: login.errorCode }
         const error = typeof login.error === 'string' ? login.error.toLowerCase() : ''
         return { success: false, errorCode: error.includes('already') || error.includes('in progress') ? 'busy'
           : error.includes('cancel') || error.includes('closed') ? 'cancelled' : error.includes('timeout') ? 'timeout' : 'browser_error' }
@@ -133,13 +135,26 @@ export async function reauthenticateAccount(input: unknown): Promise<AccountReau
   }
 }
 
-/** Account deletion also disposes its owned browser. A deleted account can never be recreated by an in-flight login. */
-export async function clearAccountReauthentication(accountId: string): Promise<void> {
+/** Capture in main before deletion, including accounts that never used reauthentication.
+ * Only the selected Arena record needs decryption; the closure exports no credentials.
+ */
+export function captureAccountBrowserCleanup(accountId: string): () => Promise<void> {
+  const metadata = storeManager.getAccountById(accountId)
+  const account = metadata?.providerId === 'arena' ? storeManager.getAccountById(accountId, true) : undefined
+  const profileId = account?.providerId === 'arena' && typeof account.credentials.browserProfileId === 'string'
+    ? account.credentials.browserProfileId : undefined
+  return () => clearAccountReauthentication(accountId, profileId)
+}
+
+/** Account deletion also disposes its owned browser. A deleted account can never be recreated by an in-flight login.
+ * capturedProfileId is a main-process snapshot only; no renderer/API channel accepts it.
+ */
+export async function clearAccountReauthentication(accountId: string, capturedProfileId?: string): Promise<void> {
   try { await zaiAccountBrowserManager.clearAccount(accountId) }
   catch { console.error('[Account login] The deleted account browser could not be cleared yet.') }
-  const profileId = arenaAccountProfiles.get(accountId)
+  const profileIds = new Set([capturedProfileId, arenaAccountProfiles.get(accountId)].filter((id): id is string => !!id))
   arenaAccountProfiles.delete(accountId)
-  if (profileId) {
+  for (const profileId of profileIds) {
     try { await arenaBrowserManager.clearProfile(profileId) }
     catch { console.error('[Account login] The deleted Arena account browser could not be cleared yet.') }
   }

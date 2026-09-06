@@ -35,7 +35,7 @@ function Get-CimInstance { foreach ($item in (${ps(JSON.stringify(metadata))} | 
 $global:launchCount = 0
 function Write-FixtureReport {
     param($Mode, $Status = 'ok', $Timestamp = [DateTimeOffset]::UtcNow.ToString('o'))
-    $body = @{ status = $Status; checkedAt = $Timestamp; live = ($Mode -notin @('catalog', 'login', 'arena-login', 'zai-login', 'accounts-status', 'network')); stream = ($Mode -eq 'stream'); protocol = $(if ($Mode -eq 'stream') { 'anthropic' } else { 'openai' }); untrustedExtra = 'fixture-not-for-output' }
+    $body = @{ status = $Status; checkedAt = $Timestamp; live = ($Mode -notin @('catalog', 'login', 'arena-login', 'arena-relogin', 'zai-login', 'accounts-status', 'network')); stream = ($Mode -eq 'stream'); protocol = $(if ($Mode -eq 'stream') { 'anthropic' } else { 'openai' }); untrustedExtra = 'fixture-not-for-output' }
     $body | ConvertTo-Json | Set-Content -LiteralPath (Join-Path ${ps(f.dir)} "artifacts\\proxy-$Mode-probe.json") -Encoding UTF8
 }
 function Start-Process {
@@ -63,6 +63,19 @@ windowsTest('network inspection dispatches read-only and rejects combined modes 
     const value = JSON.parse(combined.stdout)
     assert.equal(value.launches, 0)
     assert.match(value.error, /cannot be combined/)
+  }
+})
+
+windowsTest('Arena re-login dispatches once and forbids every other diagnostic mode', t => {
+  const f = fixture(t)
+  const result = run(f, { args: '-ArenaRelogin' })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(JSON.parse(result.stdout).Mode, 'arena-relogin')
+  for (const mode of ['-Live', '-Stream', '-DeepSeekLogin', '-ArenaLogin', '-Arena', '-ZaiLogin', '-Accounts', '-AccountStatus', '-DeepSeekAllModes', '-ZaiLiveness', '-Tools', '-Network']) {
+    const combined = run(f, { command: `try { & ${ps(f.script)} -ArenaRelogin ${mode} } catch { @{ error = $_.Exception.Message; launches = $launchCount } | ConvertTo-Json -Compress }` })
+    assert.equal(combined.status, 0, combined.stderr)
+    assert.equal(JSON.parse(combined.stdout).launches, 0)
+    assert.match(JSON.parse(combined.stdout).error, /cannot be combined/)
   }
 })
 

@@ -7,8 +7,9 @@ import type { ProviderType } from './types'
 import { getTokenExtractionConfig, type TokenExtractionConfig } from './tokenExtractionConfig'
 import { isBrowserLoginUrl, isCredentialCandidate, isProviderHost, isProviderUrl, loginLoadError, storedCredential } from './loginPolicy'
 import { applyProxyToSession } from '../network/proxy'
+import type { AccountReauthenticationErrorCode } from '../../shared/accountReauthentication'
 
-export interface InAppLoginResult { success: boolean; credentials?: Record<string, string>; error?: string }
+export interface InAppLoginResult { success: boolean; credentials?: Record<string, string>; error?: string; errorCode?: AccountReauthenticationErrorCode }
 export interface TokenFoundEvent { key: string; value: string; allCookies?: Record<string, string> }
 export interface InAppLoginOptions {
   providerId: string
@@ -19,6 +20,9 @@ export interface InAppLoginOptions {
 }
 const DEFAULT_TIMEOUT = 300000
 const MIN_LOGIN_TIME = 5000
+class LoginWindowFailure extends Error {
+  constructor(readonly errorCode: AccountReauthenticationErrorCode, message: string) { super(message) }
+}
 
 export class InAppLoginManager extends EventEmitter {
   private loginWindow: BrowserWindow | null = null
@@ -36,9 +40,9 @@ export class InAppLoginManager extends EventEmitter {
   private cookieListener: ((...args: any[]) => void) | null = null
 
   async startLogin(options: InAppLoginOptions): Promise<InAppLoginResult> {
-    if (this.active) return { success: false, error: 'A login process is already in progress' }
+    if (this.active) return { success: false, errorCode: 'busy', error: 'A login process is already in progress' }
     const config = getTokenExtractionConfig(options.providerType)
-    if (!config || !isBrowserLoginUrl(config.loginUrl)) return { success: false, error: 'This provider has no supported login page.' }
+    if (!config || !isBrowserLoginUrl(config.loginUrl)) return { success: false, errorCode: 'unsupported_provider', error: 'This provider has no supported login page.' }
     if (options.proxyMode !== undefined && !['system', 'none'].includes(options.proxyMode)) return { success: false, error: 'Invalid login proxy mode.' }
     if (options.timeout !== undefined && (!Number.isFinite(options.timeout) || options.timeout < 1000 || options.timeout > 30 * 60 * 1000)) {
       return { success: false, error: 'Login timeout must be between 1 second and 30 minutes.' }
@@ -52,42 +56,55 @@ export class InAppLoginManager extends EventEmitter {
     this.config = config
     this.loginStartTime = Date.now()
     const result = new Promise<InAppLoginResult>(resolve => { this.resolvePromise = resolve })
-    this.timeoutId = setTimeout(() => this.complete({ success: false, error: 'Login timeout. Please retry when ready to sign in.' }), options.timeout ?? DEFAULT_TIMEOUT)
+    this.timeoutId = setTimeout(() => this.complete({ success: false, errorCode: 'timeout', error: 'Login timeout. Please retry when ready to sign in.' }), options.timeout ?? DEFAULT_TIMEOUT)
     this.emit('status', { status: 'pending', message: 'Opening isolated login window...' })
     void this.createLoginWindow({ ...options, proxyConfig }, generation).catch(error => {
       if (error?.code === 'ERR_ABORTED' || error?.errno === -3) return
-      if (this.active && this.generation === generation) this.complete({ success: false, error: loginLoadError(error?.code) })
+      if (this.active && this.generation === generation) this.complete({ success: false,
+        errorCode: error instanceof LoginWindowFailure ? error.errorCode : 'browser_error',
+        error: error instanceof LoginWindowFailure ? error.message : 'The login browser could not be initialized.' })
     })
     return result
   }
 
   private async createLoginWindow(options: InAppLoginOptions, generation: number): Promise<void> {
-    // No persist: prefix: attempts never reuse another account's cookies or leave disk profiles.
-    const loginSession = session.fromPartition(`oauth-${randomUUID()}`)
-    this.loginSession = loginSession
-    // Both system and direct modes are fully configured before any navigation.
-    await applyProxyToSession(loginSession, options.proxyConfig ?? options.proxyMode ?? getProviderProxyConfig(options.providerId))
-    if (!this.active || generation !== this.generation) return
-    const config = this.config!
-    // Keep the actual runtime UA and client hints; do not claim another OS or Chromium version.
-    const window = new BrowserWindow({
-      width: 1060, height: 780, minWidth: 640, minHeight: 480, show: false,
-      title: config.windowTitle || 'Login', autoHideMenuBar: true,
-      webPreferences: { session: loginSession, nodeIntegration: false, contextIsolation: true,
-        sandbox: true, webSecurity: true, allowRunningInsecureContent: false },
-    })
-    this.loginWindow = window
-    this.attachWindow(window)
-    this.setupTokenInterception(loginSession, generation)
-    window.once('ready-to-show', () => {
-      if (!window.isDestroyed()) window.show()
-      if (this.active) this.emit('status', { status: 'pending', message: 'Please sign in normally in the login window.' })
-    })
-    window.once('closed', () => {
-      if (this.active && generation === this.generation) this.complete({ success: false, error: 'Login window was closed.' })
-    })
-    this.pollId = setInterval(() => { void this.checkForTokens() }, 1500)
-    await window.loadURL(config.loginUrl)
+    let failureCode: AccountReauthenticationErrorCode = 'profile_unavailable'
+    try {
+      // No persist: prefix: attempts never reuse another account's cookies or leave disk profiles.
+      const loginSession = session.fromPartition(`oauth-${randomUUID()}`)
+      this.loginSession = loginSession
+      // Both system and direct modes are fully configured before any navigation.
+      failureCode = 'network_error'
+      await applyProxyToSession(loginSession, options.proxyConfig ?? options.proxyMode ?? getProviderProxyConfig(options.providerId))
+      if (!this.active || generation !== this.generation) return
+      const config = this.config!
+      // Keep the actual runtime UA and client hints; do not claim another OS or Chromium version.
+      failureCode = 'browser_start_failed'
+      const window = new BrowserWindow({
+        width: 1060, height: 780, minWidth: 640, minHeight: 480, show: false,
+        title: config.windowTitle || 'Login', autoHideMenuBar: true,
+        webPreferences: { session: loginSession, nodeIntegration: false, contextIsolation: true,
+          sandbox: true, webSecurity: true, allowRunningInsecureContent: false },
+      })
+      this.loginWindow = window
+      this.attachWindow(window)
+      this.setupTokenInterception(loginSession, generation)
+      window.once('ready-to-show', () => {
+        if (!window.isDestroyed()) window.show()
+        if (this.active) this.emit('status', { status: 'pending', message: 'Please sign in normally in the login window.' })
+      })
+      window.once('closed', () => {
+        if (this.active && generation === this.generation) this.complete({ success: false, errorCode: 'cancelled', error: 'Login window was closed.' })
+      })
+      this.pollId = setInterval(() => { void this.checkForTokens() }, 1500)
+      failureCode = 'page_not_ready'
+      await window.loadURL(config.loginUrl)
+    } catch (error) {
+      // Navigation handoffs are not failures, and untrusted exception messages never leave main.
+      const loadCode = (error as { code?: unknown; errno?: unknown })?.code
+      if (loadCode === 'ERR_ABORTED' || (error as { errno?: unknown })?.errno === -3) return
+      throw new LoginWindowFailure(failureCode, loginLoadError(typeof loadCode === 'string' || typeof loadCode === 'number' ? loadCode : undefined))
+    }
   }
 
   private attachWindow(window: BrowserWindow): void {
@@ -123,7 +140,7 @@ export class InAppLoginManager extends EventEmitter {
       if (this.active && isMainFrame && code !== -3) this.emit('status', { status: 'pending', message: loginLoadError(code) })
     })
     contents.on('render-process-gone', () => {
-      if (this.active) this.complete({ success: false, error: 'The login browser stopped unexpectedly. Restart the app and retry.' })
+      if (this.active) this.complete({ success: false, errorCode: 'browser_connection_failed', error: 'The login browser stopped unexpectedly. Restart the app and retry.' })
     })
   }
 
@@ -239,7 +256,7 @@ export class InAppLoginManager extends EventEmitter {
     this.networkTokens = {}
     this.checking = false
   }
-  cancel(): void { this.complete({ success: false, error: 'Login cancelled by user.' }) }
+  cancel(): void { this.complete({ success: false, errorCode: 'cancelled', error: 'Login cancelled by user.' }) }
   isWindowOpen(): boolean { return this.active }
   destroy(): void { this.cancel(); this.removeAllListeners() }
 }

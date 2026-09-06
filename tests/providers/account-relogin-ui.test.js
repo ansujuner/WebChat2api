@@ -47,6 +47,7 @@ function fixture(options = {}) {
     '@/components/ui/button': { Button }, '@/components/ui/input': { Input: props => React.createElement('input', props) }, '@/components/ui/label': { Label: wrap }, '@/components/ui/badge': { Badge: wrap },
     '@/components/ui/tabs': { Tabs: wrap, TabsContent: wrap, TabsList: wrap, TabsTrigger },
     '../../../../shared/accountIdentity': accountIdentity,
+    '@/lib/loginFailure': load('src/renderer/src/lib/loginFailure.ts', {}),
     '../../../../shared/accountReauthentication': require('../../src/shared/accountReauthentication.ts'),
     globals: { window: { electronAPI: {
       oauth: { startInAppLogin: async (...args) => { calls.login.push(args); return options.login ? options.login() : success() } },
@@ -252,8 +253,22 @@ test('new Zai accounts still use the normal OAuth draft flow instead of restorin
   assert.deepEqual(f.calls.add[0].credentials, { token: 'NEW-FIXTURE' })
 })
 
+test('new Arena account failures are localized rather than literal keys or private provider text', async () => {
+  for (const language of ['zh-CN', 'en-US']) {
+    for (const errorCode of ['network_error', 'browser_error', 'profile_unavailable', 'browser_not_found', 'browser_start_failed', 'browser_connection_failed', 'page_not_ready', 'PRIVATE-ERROR']) {
+      const f = fixture({ language, props: { provider: provider('arena'), editingAccount: null },
+        login: async () => ({ success: false, errorCode, error: 'PRIVATE-ERROR' }) })
+      await f.login()
+      const key = errorCode === 'PRIVATE-ERROR' ? 'providers.loginFailed' : `providers.loginErrors.${errorCode}`
+      assert.equal(f.status(), f.t(key)); assert.notEqual(f.status(), key)
+      assert.doesNotMatch(f.status(), /PRIVATE-ERROR/)
+      assert.deepEqual(f.calls.add, []); assert.deepEqual(f.calls.reauthenticate, [])
+    }
+  }
+})
+
 test('Zai restoration failures preserve the original draft, translate all safe errors and never render provider text', async () => {
-  const errors = ['invalid_account', 'unsupported_provider', 'busy', 'cancelled', 'timeout', 'identity_mismatch', 'identity_unverified', 'login_required', 'network_error', 'route_changed', 'browser_error', 'account_changed', 'save_failed']
+  const errors = ['invalid_account', 'unsupported_provider', 'busy', 'cancelled', 'timeout', 'identity_mismatch', 'identity_unverified', 'login_required', 'network_error', 'route_changed', 'browser_error', 'profile_unavailable', 'browser_not_found', 'browser_start_failed', 'browser_connection_failed', 'page_not_ready', 'account_changed', 'save_failed']
   for (const language of ['zh-CN', 'en-US']) {
     for (const errorCode of [...errors, 'SECRET-ERROR-FIXTURE', '__proto__']) {
       const f = zaiFixture({ language, reauthenticate: async () => ({ success: false, accountId: 'existing-a', state: 'failed', errorCode, error: 'SECRET-ERROR-FIXTURE' }) })

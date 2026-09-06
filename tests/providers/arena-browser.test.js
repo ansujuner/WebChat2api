@@ -13,7 +13,7 @@ function load(name, overrides = {}, globals = {}) {
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(fileName, 'utf8'), {
     fileName, compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   }).outputText, {
-    module, exports: module.exports, Buffer, URL, AbortController, setTimeout, clearTimeout,
+    module, exports: module.exports, Buffer, URL, AbortController, setTimeout, clearTimeout, process: { platform: process.platform },
     console: new Proxy({}, { get: () => () => { throw Error('No Arena diagnostics may log credentials or raw responses') } }),
     require(name) {
       if (Object.hasOwn(overrides, name)) return overrides[name]
@@ -47,7 +47,7 @@ function fakeFiles() {
   }
   return { entries, api, appDirectory }
 }
-function managerFixture(globals = {}) {
+function managerFixture(globals = {}, overrides = {}) {
   const files = fakeFiles(), calls = [], config = { oauthProxyMode: 'none' }
   let ledger = { version: 1, updatedAt: 0, buckets: {} }
   const quota = new rateLimits.ArenaRateLimiter({ read: () => ledger, write: value => { ledger = plain(value) } })
@@ -66,6 +66,7 @@ function managerFixture(globals = {}) {
     '../oauth/cdpPipe': { CdpPipe: class { constructor() { throw Error('Tests must not create a CDP pipe') } } },
     'node:child_process': { spawn() { throw Error('Tests must not launch a process') } },
     'node:fs/promises': files.api,
+    ...overrides,
   }, globals)
   const manager = new api.ArenaBrowserManager()
   const context = { pipe: { async send(method, params) { calls.push({ method, params }); return {} } }, exited: () => false, proxyConfig: { mode: 'none' } }
@@ -337,7 +338,7 @@ test('Arena wrong identity, missing original profile and a deleted account never
     const result = await f.manager.reauthenticate({ profileId, expectedEmail: kind === 'identity' ? 'other@example.test' : snapshot.accountInfo.email,
       isAccountCurrent: () => kind !== 'deleted' })
     assert.equal(result.success, false)
-    assert.equal(result.errorCode, kind === 'identity' ? 'identity_mismatch' : kind === 'deleted' ? 'account_changed' : 'browser_error')
+    assert.equal(result.errorCode, kind === 'identity' ? 'identity_mismatch' : kind === 'deleted' ? 'account_changed' : 'profile_unavailable')
     assert.equal(result.profileId, undefined)
     assert.equal(f.manager.busyProfiles.size, 0)
   }
@@ -393,7 +394,7 @@ test('Arena route_changed is a fixed action-required error before auth, quota re
   assert.equal(f.manager.busyProfiles.size, 0)
   const login = await f.manager.reauthenticate({ profileId, expectedEmail: snapshot.accountInfo.email, isAccountCurrent: () => true })
   assert.deepEqual(plain(login), { success: false, errorCode: 'route_changed' })
-  assert.deepEqual(plain(await f.manager.status(profileId)), { authenticated: false, actionRequired: true, errorCode: 'route_changed' })
+  assert.deepEqual(plain(await f.manager.status(profileId)), { authenticated: false, ready: false, actionRequired: true, errorCode: 'route_changed' })
   assert.equal(f.calls.some(call => call.method === 'Browser.close'), false)
 })
 
@@ -582,8 +583,9 @@ test('Arena manager persists model-only429 cooldown and rejects the next submiss
 
 test('Arena destroy closes only owned private pipes and concurrent shutdown does not duplicate Browser.close', async () => {
   const f = managerFixture(), calls = []
-  const context = { ...f.context, exit: Promise.resolve(), pipe: {
-    async send(method) { calls.push(method) }, close() { calls.push('pipe.close') },
+  let exited = false
+  const context = { ...f.context, exited: () => exited, exit: Promise.resolve(), pipe: {
+    async send(method) { calls.push(method); exited = true }, close() { calls.push('pipe.close') },
   } }
   f.manager.browsers.set(profileId, Promise.resolve(context))
   assert.equal(f.manager.hasOpenBrowsers(), true)
@@ -756,12 +758,133 @@ test('Arena readiness does not wait on an already hydrated logged-out account', 
 test('Arena hydration wait is bounded at 30 seconds and respects cancellation', async () => {
   const f = readinessFixture()
   f.manager.evaluate = async () => ({ ...snapshot, ready: false })
-  await rejectsCode(f.manager.getModels(profileId), 'action_required')
+  await assert.rejects(f.manager.getModels(profileId), error => error.errorCode === 'page_not_ready')
   assert.equal(f.elapsed, 30000)
   const abort = new AbortController(), g = readinessFixture()
   g.manager.evaluate = async () => { abort.abort(); return { ...snapshot, ready: false } }
   await rejectsCode(g.manager.getModels(profileId, abort.signal), 'aborted')
   assert.equal(g.sleeps, 0)
+})
+
+test('Arena profile ownership permits only Windows case normalization, never symlinks or redirected paths', async () => {
+  for (const platform of ['win32', 'linux']) {
+    const f = managerFixture({ process: { platform } })
+    const directory = await f.api.arenaProfileDirectory(profileId, true)
+    const directoryRoot = path.dirname(directory)
+    f.files.entries.get(directoryRoot).realpath = directoryRoot.toUpperCase()
+    f.files.entries.get(directory).realpath = directory.toUpperCase()
+    if (platform === 'win32') assert.equal(await f.api.arenaProfileDirectory(profileId), directory)
+    else await assert.rejects(f.api.arenaProfileDirectory(profileId), error => error.errorCode === 'profile_unavailable')
+    f.files.entries.get(directoryRoot).link = true
+    await assert.rejects(f.api.arenaProfileDirectory(profileId), error => error.errorCode === 'profile_unavailable')
+    const fresh = await f.manager.startLogin()
+    assert.equal(fresh.errorCode, 'profile_unavailable')
+    assert.doesNotMatch(JSON.stringify(fresh), /fixture-cookie|arena-unit-profile-fixture/)
+  }
+})
+
+function launchFixture(options = {}) {
+  const { EventEmitter } = require('node:events'), { PassThrough, Writable } = require('node:stream')
+  const { CdpPipe } = load('../oauth/cdpPipe')
+  const children = [], commands = []
+  const f = managerFixture({ setTimeout: (fn, ms) => setTimeout(fn, ms === 5000 ? 1 : ms) }, {
+    '../oauth/browserDiscovery': {
+      async findInstalledLoginBrowser() { if (options.failure === 'discovery') throw Error(secret); return { name: 'Chrome', executable: 'fixture.exe' } },
+      loginBrowserArguments: () => ['--remote-debugging-pipe', 'https://fixture.invalid/'], browserChildEnvironment: () => ({}),
+    },
+    '../oauth/cdpPipe': { CdpPipe },
+    'node:child_process': { spawn() {
+      if (options.failure === 'spawn') throw Error(secret)
+      const child = new EventEmitter(), output = new PassThrough()
+      const input = new Writable({ write(chunk, _encoding, done) {
+        const request = JSON.parse(chunk.toString().slice(0, -1)); commands.push(request.method)
+        queueMicrotask(() => {
+          if (request.method === 'Browser.getVersion' && ['handshake-exit', 'handshake-live', 'spawn-event'].includes(options.failure)) {
+            if (options.failure === 'spawn-event') child.emit('error', Error(secret))
+            if (options.failure === 'handshake-exit') child.emit('exit', 1)
+            output.end(); return
+          }
+          if (request.method === 'Browser.close' && !options.refuseClose) child.emit('exit', 0)
+          output.write(JSON.stringify({ id: request.id, ...(request.method === 'Browser.close' && options.refuseClose
+            ? { error: { message: secret } } : { result: {} }) }) + '\0')
+        })
+        done()
+      } })
+      child.stdio = [null, null, null, input, output]
+      children.push(child)
+      return child
+    } },
+  })
+  f.manager.readyPage = async () => ({ targetId: 'owned', sessionId: 'fixture', snapshot })
+  return { ...f, children, commands }
+}
+
+test('Arena actual launch classifies discovery, spawn and real private-pipe handshake failures for new and existing logins', async () => {
+  for (const [failure, expected] of [['discovery', 'browser_not_found'], ['spawn', 'browser_start_failed'],
+    ['spawn-event', 'browser_start_failed'], ['handshake-exit', 'browser_connection_failed'], ['handshake-live', 'browser_connection_failed']]) {
+    for (const existing of [false, true]) {
+      const f = launchFixture({ failure })
+      if (existing) await f.api.arenaProfileDirectory(profileId, true)
+      const result = existing ? await f.manager.reauthenticate({ profileId, expectedEmail: snapshot.accountInfo.email, isAccountCurrent: () => true }) : await f.manager.startLogin()
+      assert.equal(result.success, false, failure)
+      assert.equal(result.errorCode, expected, failure)
+      assert.doesNotMatch(JSON.stringify(result), /fixture-cookie|fixture\.exe|arena-unit-profile-fixture/)
+      assert.equal(f.commands.filter(method => method === 'Browser.getVersion').length, ['discovery', 'spawn'].includes(failure) ? 0 : 1)
+      assert.equal(f.commands.includes('Browser.close'), false, 'A lost pipe never closes a possibly visible manual browser')
+      if (failure === 'handshake-live') {
+        const retainedId = [...f.manager.ownedBrowsers.keys()][0]
+        await assert.rejects(f.manager.context(retainedId), error => error.errorCode === 'browser_connection_failed')
+        assert.equal(f.children.length, 1)
+        f.children[0].emit('exit', 0)
+        await f.manager.closeProfile(retainedId)
+      }
+    }
+  }
+})
+
+test('Arena real CDP disconnection retains a live browser without reusing, closing or relaunching it', async () => {
+  const f = launchFixture()
+  await f.api.arenaProfileDirectory(profileId, true)
+  const context = await f.manager.context(profileId)
+  context.pipe.close()
+  assert.equal(context.exited(), false)
+  await assert.rejects(f.manager.context(profileId), error => error.errorCode === 'browser_connection_failed')
+  assert.deepEqual(plain(await f.manager.status(profileId)), { authenticated: false, ready: false, actionRequired: true, errorCode: 'browser_connection_failed' })
+  const result = await f.manager.reauthenticate({ profileId, expectedEmail: snapshot.accountInfo.email, isAccountCurrent: () => true })
+  assert.equal(result.errorCode, 'browser_connection_failed')
+  assert.equal(f.children.length, 1)
+  assert.equal(f.commands.includes('Browser.close'), false)
+  f.children[0].emit('exit', 0)
+  await f.manager.context(profileId)
+  assert.equal(f.children.length, 2, 'Only an exited owned process permits a fresh private pipe')
+  await f.manager.destroy()
+})
+
+test('Arena failed Browser.close retains ownership until actual process exit and prevents duplicate launch', async () => {
+  const f = launchFixture({ refuseClose: true })
+  await f.api.arenaProfileDirectory(profileId, true)
+  await f.manager.context(profileId)
+  await f.manager.closeProfile(profileId)
+  assert.equal(f.manager.hasOpenBrowsers(), true)
+  assert.equal(f.manager.ownedBrowsers.size, 1)
+  await assert.rejects(f.manager.context(profileId), error => error.errorCode === 'browser_connection_failed')
+  assert.equal(f.children.length, 1)
+  f.children[0].emit('exit', 0)
+  await f.manager.closeProfile(profileId)
+  assert.equal(f.manager.hasOpenBrowsers(), false)
+})
+
+test('Arena unreadable page status reports page_not_ready rather than a confirmed logout', async () => {
+  const f = readinessFixture()
+  f.manager.evaluate = async () => ({ ...snapshot, ready: false })
+  assert.deepEqual(plain(await f.manager.status(profileId)), { authenticated: false, ready: false, actionRequired: true, errorCode: 'page_not_ready' })
+  assert.equal(f.elapsed, 30000)
+  const g = managerFixture(); g.manager.context = async () => g.context
+  let checks = 0
+  g.manager.status = async () => { checks++; return { authenticated: false, ready: false, errorCode: 'page_not_ready' } }
+  g.manager.closeProfile = async () => undefined
+  assert.equal((await g.manager.startLogin()).errorCode, 'page_not_ready')
+  assert.equal(checks, 1, 'A failed inspection must not poll as if waiting on a known logged-out account')
 })
 
 test('Arena initial props alone never claim hydration; both live user and model stores are required', () => {

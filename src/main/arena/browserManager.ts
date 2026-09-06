@@ -17,13 +17,33 @@ import { ARENA_RUNTIME_SNAPSHOT, arenaStartExpression, arenaDrainExpression, are
 import { getArenaRateLimiter, isArenaQuotaAccountId } from './rateLimit'
 
 export interface ArenaAccountInfo { email?: string; name?: string }
-export interface ArenaLoginResult { success: boolean; profileId?: string; accountInfo?: ArenaAccountInfo; error?: string }
+export type ArenaBrowserFailureCode = 'profile_unavailable' | 'browser_not_found' | 'browser_start_failed' | 'browser_connection_failed' | 'page_not_ready'
+const BROWSER_FAILURES: Record<ArenaBrowserFailureCode, string> = {
+  profile_unavailable: 'The original app-owned Arena profile is unavailable or failed its ownership check.',
+  browser_not_found: 'No signature-verified Chrome or Edge installation is available.',
+  browser_start_failed: 'The installed Arena browser could not be started.',
+  browser_connection_failed: 'The private Arena browser connection failed. If its window is still open, finish any manual chat and close that window before signing in again.',
+  page_not_ready: 'The Arena page could not be checked. It may still be loading or showing a network or verification page; this does not establish that the account is signed out.',
+}
+/** Login diagnostics retain a safe stage without changing the public HTTP error contract. */
+export class ArenaBrowserFailure extends ArenaError {
+  constructor(readonly errorCode: ArenaBrowserFailureCode) {
+    super('browser_unavailable', { stage: errorCode === 'page_not_ready' ? 'snapshot' : 'browser' })
+    this.message = BROWSER_FAILURES[errorCode]
+  }
+}
+const loginErrorCode = (error: unknown): AccountReauthenticationErrorCode => error instanceof ArenaBrowserFailure ? error.errorCode
+  : error instanceof ArenaError && error.code === 'route_changed' ? 'route_changed' : 'browser_error'
+export interface ArenaLoginResult { success: boolean; profileId?: string; accountInfo?: ArenaAccountInfo; error?: string; errorCode?: AccountReauthenticationErrorCode }
 export interface ArenaReauthenticationOptions { profileId: string; expectedEmail?: string; isAccountCurrent: () => boolean }
 export interface ArenaReauthenticationResult extends ArenaLoginResult { errorCode?: AccountReauthenticationErrorCode }
-export interface ArenaStatus { authenticated: boolean; accountInfo?: ArenaAccountInfo; actionRequired?: boolean; errorCode?: 'route_changed' }
+export interface ArenaStatus { authenticated: boolean; ready?: boolean; accountInfo?: ArenaAccountInfo; actionRequired?: boolean; errorCode?: AccountReauthenticationErrorCode }
 export interface ArenaChatOptions { accountId: string; profileId: string; model: string; prompt: string; conversation?: ArenaConversation; signal?: AbortSignal }
 export interface ArenaCatalog { models: ArenaModel[]; source: 'runtime' | 'public-snapshot' }
-interface BrowserContext { profileId: string; pipe: CdpPipe; child: ChildProcess; exited: () => boolean; exit: Promise<void>; proxyConfig: ProviderProxyConfig }
+interface BrowserOwnership { profileId: string; pipe?: CdpPipe; child: ChildProcess; exited: () => boolean; exit: Promise<void>; connected?: () => boolean; proxyConfig: ProviderProxyConfig }
+interface BrowserContext extends BrowserOwnership { pipe: CdpPipe }
+const sameOwnedPath = (left: string, right: string) => process.platform === 'win32'
+  ? path.resolve(left).toLowerCase() === path.resolve(right).toLowerCase() : path.resolve(left) === path.resolve(right)
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(new ArenaError('aborted'))
@@ -38,39 +58,42 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 /** Only application-created UUID profiles are accepted; never attach to an existing personal browser. */
 export async function arenaProfileDirectory(profileId: string, create = false): Promise<string> {
   if (!isArenaUuid(profileId)) throw new ArenaError('invalid_request')
-  const appDirectory = await realpath(app.getPath('userData'))
-  const root = path.join(appDirectory, 'arena-browser-profiles')
-  await mkdir(root, { recursive: true })
-  if ((await lstat(root)).isSymbolicLink() || await realpath(root) !== root) throw new ArenaError('browser_unavailable')
-  const directory = path.join(root, profileId)
-  if (create) {
-    await mkdir(directory)
-    await writeFile(path.join(directory, 'chat2api-profile.json'), JSON.stringify({ provider: 'arena', version: 1, profileId }), { flag: 'wx', mode: 0o600 })
-  }
-  if ((await lstat(directory)).isSymbolicLink() || await realpath(directory) !== directory || path.dirname(directory) !== root) throw new ArenaError('browser_unavailable')
-  const markerPath = path.join(directory, 'chat2api-profile.json')
-  const markerStat = await lstat(markerPath)
-  if (!markerStat.isFile() || markerStat.isSymbolicLink() || markerStat.size > 512) throw new ArenaError('browser_unavailable')
-  const markerText = await readFile(markerPath, 'utf8')
-  if (markerText.length > 512) throw new ArenaError('browser_unavailable')
-  let marker: any
-  try { marker = JSON.parse(markerText) } catch { throw new ArenaError('browser_unavailable') }
-  if (!marker || typeof marker !== 'object' || marker.provider !== 'arena' || marker.version !== 1 || marker.profileId !== profileId) throw new ArenaError('browser_unavailable')
-  return directory
+  try {
+    const appDirectory = await realpath(app.getPath('userData'))
+    const root = path.join(appDirectory, 'arena-browser-profiles')
+    await mkdir(root, { recursive: true })
+    if ((await lstat(root)).isSymbolicLink() || !sameOwnedPath(await realpath(root), root)) throw new ArenaBrowserFailure('profile_unavailable')
+    const directory = path.join(root, profileId)
+    if (create) {
+      await mkdir(directory)
+      await writeFile(path.join(directory, 'chat2api-profile.json'), JSON.stringify({ provider: 'arena', version: 1, profileId }), { flag: 'wx', mode: 0o600 })
+    }
+    if ((await lstat(directory)).isSymbolicLink() || !sameOwnedPath(await realpath(directory), directory) || !sameOwnedPath(path.dirname(directory), root)) throw new ArenaBrowserFailure('profile_unavailable')
+    const markerPath = path.join(directory, 'chat2api-profile.json')
+    const markerStat = await lstat(markerPath)
+    if (!markerStat.isFile() || markerStat.isSymbolicLink() || markerStat.size > 512) throw new ArenaBrowserFailure('profile_unavailable')
+    const markerText = await readFile(markerPath, 'utf8')
+    if (markerText.length > 512) throw new ArenaBrowserFailure('profile_unavailable')
+    const marker = JSON.parse(markerText)
+    if (!marker || typeof marker !== 'object' || marker.provider !== 'arena' || marker.version !== 1 || marker.profileId !== profileId) throw new ArenaBrowserFailure('profile_unavailable')
+    return directory
+  } catch { throw new ArenaBrowserFailure('profile_unavailable') }
 }
 
 export class ArenaBrowserManager extends EventEmitter {
   private browsers = new Map<string, Promise<BrowserContext>>()
+  // A failed handshake/close must not orphan a still-running process and relaunch its locked profile.
+  private ownedBrowsers = new Map<string, BrowserOwnership>()
   private closingProfiles = new Map<string, Promise<void>>()
   private busyProfiles = new Set<string>()
   private login: { controller: AbortController; completion: Promise<ArenaLoginResult>; profileId?: string } | null = null
   private destroyed = false
 
   isWindowOpen(): boolean { return this.login !== null }
-  hasOpenBrowsers(): boolean { return this.login !== null || this.browsers.size > 0 }
+  hasOpenBrowsers(): boolean { return this.login !== null || this.browsers.size > 0 || this.ownedBrowsers.size > 0 }
   async startLogin(): Promise<ArenaLoginResult> {
-    if (this.destroyed) return { success: false, error: 'The Arena browser manager is shutting down.' }
-    if (this.login) return { success: false, error: 'An Arena login is already in progress.' }
+    if (this.destroyed) return { success: false, errorCode: 'browser_error', error: 'The Arena browser manager is shutting down.' }
+    if (this.login) return { success: false, errorCode: 'busy', error: 'An Arena login is already in progress.' }
     const controller = new AbortController()
     const completion = this.loginFlow(controller)
     this.login = { controller, completion }
@@ -107,7 +130,10 @@ export class ArenaBrowserManager extends EventEmitter {
         let snapshot: any
         try {
           snapshot = page.snapshot
-          if (!shown) { await browser.pipe.send('Page.bringToFront', {}, page.sessionId); shown = true }
+          if (!shown) {
+            try { await browser.pipe.send('Page.bringToFront', {}, page.sessionId); shown = true }
+            catch { throw new ArenaBrowserFailure(browser.connected?.() === false || browser.exited() ? 'browser_connection_failed' : 'page_not_ready') }
+          }
         } finally { await browser.pipe.send('Target.detachFromTarget', { sessionId: page.sessionId }).catch(() => undefined) }
         if (!isCurrent()) return { success: false, errorCode: 'account_changed' }
         if (controller.signal.aborted) return { success: false, errorCode: timedOut ? 'timeout' : 'cancelled' }
@@ -125,7 +151,7 @@ export class ArenaBrowserManager extends EventEmitter {
       return { success: false, errorCode: timedOut ? 'timeout' : 'cancelled' }
     } catch (error) {
       return { success: false, errorCode: !isCurrent() ? 'account_changed' : controller.signal.aborted ? timedOut ? 'timeout' : 'cancelled'
-        : error instanceof ArenaError && error.code === 'route_changed' ? 'route_changed' : 'browser_error' }
+        : loginErrorCode(error) }
     } finally { clearTimeout(timeout) }
   }
   /** Account deletion cancels only that profile's login and closes only its owned browser. */
@@ -145,15 +171,18 @@ export class ArenaBrowserManager extends EventEmitter {
       const browser = await this.context(profileId, controller.signal)
       this.emit('status', { status: 'pending', message: 'Sign in to Arena in its isolated Chrome/Edge window. Complete verification yourself if shown. No browser credentials are exported.' })
       while (!controller.signal.aborted) {
-        if (browser.exited()) return { success: false, error: 'The Arena login browser was closed.' }
+        if (browser.exited()) return { success: false, errorCode: 'cancelled', error: 'The Arena login browser was closed.' }
         const status = await this.status(profileId, controller.signal)
         if (controller.signal.aborted) throw new ArenaError('aborted')
+        if (status.errorCode) return { success: false, errorCode: status.errorCode,
+          error: status.errorCode in BROWSER_FAILURES ? BROWSER_FAILURES[status.errorCode as ArenaBrowserFailureCode] : 'The Arena browser could not be checked.' }
         if (status.authenticated) { successful = true; return { success: true, profileId, accountInfo: status.accountInfo } }
         await delay(1000, controller.signal)
       }
-      return { success: false, error: 'Arena login was cancelled.' }
-    } catch {
-      return { success: false, error: controller.signal.aborted ? 'Arena login was cancelled or timed out.' : 'Arena login could not be completed. Check the isolated browser and try again.' }
+      return { success: false, errorCode: 'cancelled', error: 'Arena login was cancelled.' }
+    } catch (error) {
+      return { success: false, errorCode: controller.signal.aborted ? 'cancelled' : loginErrorCode(error),
+        error: controller.signal.aborted ? 'Arena login was cancelled or timed out.' : error instanceof ArenaBrowserFailure ? error.message : 'Arena login could not be completed. Check the isolated browser and try again.' }
     } finally {
       clearTimeout(timeout)
       if (!successful) await this.closeProfile(profileId)
@@ -164,7 +193,7 @@ export class ArenaBrowserManager extends EventEmitter {
   async destroy(): Promise<void> {
     this.destroyed = true
     await this.cancelAndWait()
-    await Promise.all([...this.browsers.keys()].map(id => this.closeProfile(id)))
+    await Promise.all([...new Set([...this.browsers.keys(), ...this.ownedBrowsers.keys()])].map(id => this.closeProfile(id)))
   }
 
   private async context(profileId: string, signal?: AbortSignal, requestOwner = false): Promise<BrowserContext> {
@@ -179,6 +208,7 @@ export class ArenaBrowserManager extends EventEmitter {
     if (existing) {
       const context = await existing
       if (!context.exited()) {
+        if (context.connected?.() === false) throw new ArenaBrowserFailure('browser_connection_failed')
         if (JSON.stringify(context.proxyConfig) === JSON.stringify(proxyConfig)) return context
         // An idle API lease cannot prove a visible website's manual generation has finished.
         // Never close it or submit on the old route; the user must close this window first.
@@ -188,54 +218,79 @@ export class ArenaBrowserManager extends EventEmitter {
       await this.closeProfile(profileId)
       return this.context(profileId, signal, requestOwner)
     }
+    const retained = this.ownedBrowsers.get(profileId)
+    if (retained) {
+      if (!retained.exited()) throw new ArenaBrowserFailure('browser_connection_failed')
+      retained.pipe?.close()
+      this.ownedBrowsers = new Map([...this.ownedBrowsers].filter(([id, value]) => id !== profileId || value !== retained))
+    }
     const launch = this.launch(profileId, proxyConfig, signal)
     this.browsers = new Map([...this.browsers, [profileId, launch]])
-    try { return await launch } catch {
+    try { return await launch } catch (error) {
       this.browsers = new Map([...this.browsers].filter(([id, value]) => id !== profileId || value !== launch))
-      throw new ArenaError(signal?.aborted ? 'aborted' : 'browser_unavailable')
+      if (signal?.aborted) throw new ArenaError('aborted')
+      throw error instanceof ArenaError ? error : new ArenaBrowserFailure('browser_start_failed')
     }
   }
   private async launch(profileId: string, proxyConfig: ProviderProxyConfig, signal?: AbortSignal): Promise<BrowserContext> {
     const directory = await arenaProfileDirectory(profileId)
-    const browser = await findInstalledLoginBrowser(signal)
+    let browser: Awaited<ReturnType<typeof findInstalledLoginBrowser>>
+    try { browser = await findInstalledLoginBrowser(signal) }
+    catch { throw signal?.aborted ? new ArenaError('aborted') : new ArenaBrowserFailure('browser_not_found') }
     if (signal?.aborted) throw new ArenaError('aborted')
     const args = [...loginBrowserArguments(directory, proxyConfig).slice(0, -1), 'https://arena.ai/text/direct']
-    const child = spawn(browser.executable, args, { shell: false, windowsHide: false, detached: false,
-      stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], env: browserChildEnvironment() })
-    let exited = false
+    let child: ChildProcess
+    try { child = spawn(browser.executable, args, { shell: false, windowsHide: false, detached: false,
+      stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], env: browserChildEnvironment() }) }
+    catch { throw new ArenaBrowserFailure('browser_start_failed') }
+    let exited = false, startFailed = false, connected = true
     const exit = new Promise<void>(resolve => {
       const finish = () => { exited = true; resolve() }
-      child.once('exit', finish); child.once('error', finish)
+      child.once('exit', finish); child.once('error', () => { startFailed = true; finish() })
     })
+    const ownership: BrowserOwnership = { profileId, child, exit, exited: () => exited, connected: () => connected, proxyConfig }
+    this.ownedBrowsers = new Map([...this.ownedBrowsers, [profileId, ownership]])
     const input = child.stdio[3] as Writable | null, output = child.stdio[4] as Readable | null
-    if (!input || !output) throw new ArenaError('browser_unavailable')
+    if (!input || !output) { connected = false; throw new ArenaBrowserFailure('browser_connection_failed') }
     const pipe = new CdpPipe(input, output)
+    const context: BrowserContext = { ...ownership, pipe }
+    this.ownedBrowsers = new Map([...this.ownedBrowsers, [profileId, context]])
+    pipe.once('close', () => { connected = false })
     try { await pipe.send('Browser.getVersion', {}, undefined, 15000) }
     catch {
-      await pipe.send('Browser.close', {}, undefined, 2000).catch(() => undefined)
+      connected = false
       pipe.close()
-      throw new ArenaError('browser_unavailable')
+      // The user may still be interacting with a visible window. Retain ownership, never relaunch it.
+      throw new ArenaBrowserFailure(startFailed ? 'browser_start_failed' : 'browser_connection_failed')
     }
-    return { profileId, pipe, child, exit, exited: () => exited, proxyConfig }
+    if (exited || !connected) throw new ArenaBrowserFailure(startFailed ? 'browser_start_failed' : 'browser_connection_failed')
+    return context
   }
   private async closeProfile(profileId: string): Promise<void> {
     const closing = this.closingProfiles.get(profileId)
     if (closing) return closing
     const pending = this.browsers.get(profileId)
-    if (!pending) return
-    const completion = (async () => { try {
-      const context = await pending
-      if (!context.exited()) await context.pipe.send('Browser.close', {}, undefined, 2000).catch(() => undefined)
-      context.pipe.close()
-      let timer: NodeJS.Timeout | undefined
-      try { await Promise.race([context.exit, new Promise<void>(resolve => { timer = setTimeout(resolve, 5000) })]) }
-      finally { if (timer) clearTimeout(timer) }
-      // Persistent application-owned profiles intentionally survive; never delete a live browser profile.
-    } catch { /* A failed launch has no reusable pipe; never export its raw exception. */ }
-    finally {
-      this.browsers = new Map([...this.browsers].filter(([id, value]) => id !== profileId || value !== pending))
-      this.closingProfiles = new Map([...this.closingProfiles].filter(([id]) => id !== profileId))
-    } })()
+    if (!pending && !this.ownedBrowsers.has(profileId)) return
+    const completion = (async () => {
+      let context: BrowserOwnership | undefined
+      try {
+        context = await pending?.catch(() => undefined) ?? this.ownedBrowsers.get(profileId)
+        if (!context) return
+        if (!context.exited() && context.connected?.() !== false) await context.pipe?.send('Browser.close', {}, undefined, 2000).catch(() => undefined)
+        context.pipe?.close()
+        let timer: NodeJS.Timeout | undefined
+        try { await Promise.race([context.exit, new Promise<void>(resolve => { timer = setTimeout(resolve, 5000) })]) }
+        finally { if (timer) clearTimeout(timer) }
+        // Persistent application-owned profiles intentionally survive; never delete a live browser profile.
+      } catch { /* Keep any still-running owned process; never export its raw exception. */ }
+      finally {
+        if (!context || context.exited()) {
+          this.browsers = new Map([...this.browsers].filter(([id, value]) => id !== profileId || value !== pending))
+          this.ownedBrowsers = new Map([...this.ownedBrowsers].filter(([id]) => id !== profileId))
+        }
+        this.closingProfiles = new Map([...this.closingProfiles].filter(([id]) => id !== profileId))
+      }
+    })()
     this.closingProfiles = new Map([...this.closingProfiles, [profileId, completion]])
     return completion
   }
@@ -265,7 +320,7 @@ export class ArenaBrowserManager extends EventEmitter {
     const deadline = Date.now() + 30000
     while (Date.now() < deadline) {
       if (signal?.aborted) throw new ArenaError('aborted', { stage: 'snapshot' })
-      if (this.destroyed || context.exited()) throw new ArenaError('browser_unavailable', { stage: 'browser' })
+      if (this.destroyed || context.exited() || context.connected?.() === false) throw new ArenaBrowserFailure('browser_connection_failed')
       let page: { targetId: string; sessionId: string } | undefined, retained = false
       try {
         page = await this.page(context)
@@ -274,6 +329,7 @@ export class ArenaBrowserManager extends EventEmitter {
         if (snapshot?.ready === true) { retained = true; return { ...page, snapshot } }
       } catch (error) {
         if (signal?.aborted || error instanceof ArenaError && error.code === 'aborted') throw new ArenaError('aborted', { stage: 'snapshot' })
+        if (context.connected?.() === false || context.exited()) throw new ArenaBrowserFailure('browser_connection_failed')
         // The initial target can still be about:blank or redirecting; no provider request is made here.
       } finally {
         if (page && !retained) await context.pipe.send('Target.detachFromTarget', { sessionId: page.sessionId }).catch(() => undefined)
@@ -281,7 +337,7 @@ export class ArenaBrowserManager extends EventEmitter {
       const remaining = deadline - Date.now()
       if (remaining > 0) await delay(Math.min(250, remaining), signal)
     }
-    throw new ArenaError('action_required', { stage: 'snapshot' })
+    throw new ArenaBrowserFailure('page_not_ready')
   }
   private async snapshot(profileId: string, signal?: AbortSignal): Promise<any> {
     const context = await this.context(profileId, signal)
@@ -297,8 +353,7 @@ export class ArenaBrowserManager extends EventEmitter {
         return { authenticated: true, accountInfo: { email, ...(typeof snapshot.accountInfo.name === 'string' && snapshot.accountInfo.name.length <= 160 ? { name: snapshot.accountInfo.name } : {}) } }
       }
       return { authenticated: false, actionRequired: true }
-    } catch (error) { return { authenticated: false, actionRequired: true,
-      ...(error instanceof ArenaError && error.code === 'route_changed' ? { errorCode: 'route_changed' as const } : {}) } }
+    } catch (error) { return { authenticated: false, ready: false, actionRequired: true, errorCode: loginErrorCode(error) } }
   }
   async getModels(profileId?: string, signal?: AbortSignal): Promise<ArenaCatalog> {
     if (profileId) {

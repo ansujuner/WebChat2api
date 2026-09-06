@@ -62,6 +62,11 @@ function application(options = {}) {
       await save({ live: false, stream: false, protocol: 'openai', status: 'awaiting_login', chatTested: false })
       return { live: false, stream: false, protocol: 'openai', status: 'passed', accountVerified: true, chatTested: false }
     } },
+    './diagnostics/arenaAccountLoginProbe': { runArenaAccountLoginProbe: async save => {
+      calls.push({ operation: 'arenaRelogin' })
+      await save({ live: false, stream: false, protocol: 'openai', status: 'awaiting_login', chatTested: false })
+      return { live: false, stream: false, protocol: 'openai', status: 'passed', accountVerified: true, chatTested: false }
+    } },
     './diagnostics/accountLiveness': {
       runAccountLivenessProbe: async input => {
         calls.push({ operation: 'accountProbe', input: plain(input) })
@@ -149,6 +154,17 @@ test('network route inspection never starts the proxy, checks accounts or submit
   assert.equal(report.live, false)
   assert.equal(report.resolutionOnly, true)
   assert.equal(report.providerRequestsSent, 0)
+})
+
+test('Arena existing-account restore uses its own explicit command and never starts chat or a new login', async () => {
+  const fixture = application()
+  await fixture.ready()
+  await fixture.second(['fixture-electron.exe', '--chat2api-probe=arena-relogin'])
+  assert.deepEqual(fixture.calls.map(call => call.operation), ['initialize', 'arenaRelogin'])
+  const report = fixture.writes.at(-1).data
+  assert.equal(report.accountVerified, true)
+  assert.equal(report.chatTested, false)
+  assert.equal(report.live, false)
 })
 
 test('existing Z.ai account restore is explicitly dispatched without proxy startup or chat generation', async () => {

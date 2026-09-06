@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react'
+import { newLoginFailureKey } from '@/lib/loginFailure'
 import { useTranslation } from 'react-i18next'
 import {
   Dialog,
@@ -371,7 +372,7 @@ export function AddAccountDialog({
       const result = await window.electronAPI.accounts.reauthenticate(accountId)
       if (!canApplyResult(request)) return
       if (!result || result.accountId !== accountId || !result.success || !['restored', 'updated'].includes(result.state)) {
-        const allowedErrors = ['invalid_account', 'unsupported_provider', 'busy', 'cancelled', 'timeout', 'identity_mismatch', 'identity_unverified', 'login_required', 'network_error', 'route_changed', 'browser_error', 'account_changed', 'save_failed']
+        const allowedErrors = ['invalid_account', 'unsupported_provider', 'busy', 'cancelled', 'timeout', 'identity_mismatch', 'identity_unverified', 'login_required', 'network_error', 'route_changed', 'browser_error', 'profile_unavailable', 'browser_not_found', 'browser_start_failed', 'browser_connection_failed', 'page_not_ready', 'account_changed', 'save_failed']
         const code = result?.accountId === accountId && allowedErrors.includes(result.errorCode || '') ? result.errorCode : 'browser_error'
         setOAuthStatus(t(`providers.accountLoginErrors.${code}`))
         return
@@ -447,15 +448,7 @@ export function AddAccountDialog({
           userInfo: result.accountInfo
         })
       } else {
-        const errorMsg = result?.error || ''
-        const translatedError = errorMsg === 'Login window was closed' 
-          ? t('providers.loginWindowClosed')
-          : errorMsg === 'A login window is already open' || errorMsg === 'A login process is already in progress'
-            ? t('providers.loginWindowAlreadyOpen')
-            : errorMsg.includes('Guest account') 
-              ? t('providers.guestAccountNotAllowed')
-              : t('providers.loginFailed')
-        setOAuthStatus(translatedError)
+        setOAuthStatus(t(newLoginFailureKey(result)))
       }
     } catch (error) {
       if (canApplyResult(request)) setOAuthStatus(t('providers.loginFailed'))

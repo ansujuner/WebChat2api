@@ -4,6 +4,7 @@
  */
 
 import type { ProviderVendor } from '../../shared/types'
+import type { AccountReauthenticationErrorCode } from '../../shared/accountReauthentication'
 
 export type ProviderType = Exclude<ProviderVendor, 'custom'>
 
@@ -29,6 +30,7 @@ export type TokenType = 'jwt' | 'refresh' | 'access' | 'cookie' | 'token'
  */
 export interface OAuthResult {
   success: boolean
+  errorCode?: AccountReauthenticationErrorCode
   providerId?: string
   providerType?: ProviderType
   credentials?: Record<string, string>
@@ -75,6 +77,7 @@ export interface OAuthCallbackData {
  */
 export interface TokenValidationResult {
   valid: boolean
+  errorCode?: AccountReauthenticationErrorCode
   tokenType?: TokenType
   expiresAt?: number
   accountInfo?: OAuthAccountInfo

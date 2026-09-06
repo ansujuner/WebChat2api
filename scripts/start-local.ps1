@@ -108,6 +108,58 @@ $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 $stdoutLog = Join-Path $logDirectory "$timestamp.stdout.log"
 $stderrLog = Join-Path $logDirectory "$timestamp.stderr.log"
 
+. (Join-Path $PSScriptRoot 'local-launch-security.ps1')
+$launchContext = Get-LocalLauncherContext
+if ($launchContext.Elevated -or $launchContext.Integrity -ge 12288) {
+    $launchId = [Guid]::NewGuid().ToString('N')
+    $requestPath = Join-Path $logDirectory "$launchId.request.json"
+    $resultPath = Join-Path $logDirectory "$launchId.result.json"
+    $helperPath = Join-Path $PSScriptRoot 'start-local-user.ps1'
+    $powershellPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $helperPath -PathType Leaf) -or -not (Test-Path -LiteralPath $powershellPath -PathType Leaf)) {
+        throw 'Standard-user launcher is unavailable. Open an ordinary, non-administrator PowerShell window and run scripts/start-local.ps1 there.'
+    }
+    $createdUtc = [DateTime]::UtcNow
+    @{ LaunchId = $launchId; Project = $projectRoot; UserSid = $launchContext.UserSid; SessionId = $launchContext.SessionId;
+        CreatedUtc = $createdUtc.ToString('o') } | ConvertTo-Json | Set-Content -LiteralPath $requestPath -Encoding UTF8
+    try {
+        $desktop = Get-LocalDesktopShell -ExpectedContext $launchContext
+        # Explorer owns this dispatch. Only the fixed helper and an opaque nonce
+        # are passed; no command, environment value, account data or URL is accepted.
+        $helperArguments = '-NoLogo -NoProfile -NonInteractive -File "' + $helperPath + '" -LaunchId ' + $launchId
+        [void]$desktop.ShellExecute($powershellPath, $helperArguments, $projectRoot, 'open', 0)
+    } catch {
+        throw 'Could not use the existing standard-user Explorer desktop. No elevated fallback was started. Open a non-administrator PowerShell window and run scripts/start-local.ps1 there.'
+    }
+    for ($attempt = 0; $attempt -lt 45 -and -not (Test-Path -LiteralPath $resultPath -PathType Leaf); $attempt++) { Start-Sleep -Seconds 1 }
+    if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+        throw 'Standard-user launch was not confirmed. Do not launch an administrator copy. Check the app/taskbar and logs/local-deployment, or retry from a non-administrator PowerShell window.'
+    }
+    try {
+        if ((Get-Item -LiteralPath $resultPath).Length -gt 16384) { throw 'launch_result_invalid' }
+        $handoff = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($handoff.LaunchId -cne $launchId -or $handoff.Success -isnot [bool] -or -not $handoff.Success -or
+            $handoff.StandardUser -isnot [bool] -or -not $handoff.StandardUser) { throw 'launch_result_invalid' }
+        $launch = $handoff.Result
+        if ($launch.Started -isnot [bool] -or $launch.AlreadyRunning -isnot [bool]) { throw 'launch_result_invalid' }
+        if ($launch.Started -and -not $launch.AlreadyRunning) {
+            $launchedIds = @([int]$launch.ProcessId)
+        } elseif (-not $launch.Started -and $launch.AlreadyRunning) {
+            $launchedIds = @($launch.ProcessIds)
+            if ($launchedIds.Count -ne 1) { throw 'launch_result_invalid' }
+        } else { throw 'launch_result_invalid' }
+        foreach ($launchedId in $launchedIds) {
+            Assert-LocalLaunchedProcess -ProcessId $launchedId -ElectronPath $electronPath -ProjectRoot $projectRoot `
+                -ExpectedContext $launchContext -NotBeforeUtc $createdUtc
+        }
+    } catch {
+        throw 'The standard-user helper did not confirm a safe launch. Open a non-administrator PowerShell window and run scripts/start-local.ps1; no elevated fallback was started.'
+    }
+    $launch
+    return
+}
+if ($launchContext.Integrity -lt 8192) { throw 'Use an ordinary desktop PowerShell session to start this application.' }
+
 # Codex and other Electron hosts may inherit ELECTRON_RUN_AS_NODE. Remove it
 # only around child creation; never alter the user's persistent environment.
 $environmentKeys = @('ELECTRON_RUN_AS_NODE', 'NODE_ENV', 'ELECTRON_RENDERER_URL')

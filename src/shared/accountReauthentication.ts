@@ -16,6 +16,11 @@ export type AccountReauthenticationErrorCode =
   | 'network_error'
   | 'route_changed'
   | 'browser_error'
+  | 'profile_unavailable'
+  | 'browser_not_found'
+  | 'browser_start_failed'
+  | 'browser_connection_failed'
+  | 'page_not_ready'
   | 'account_changed'
   | 'save_failed'
 

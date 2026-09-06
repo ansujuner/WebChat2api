@@ -234,8 +234,69 @@ test('IPC and preload expose only account ID; account and provider deletions cle
   assert.match(handler, /event.senderFrame !== event.sender.mainFrame/)
   assert.match(handler, /return reauthenticateAccount\(accountId\)/)
   assert.doesNotMatch(handler, /credentials|providerType|result\.credentials/)
-  assert.match(handlers, /if \(deleted\) await clearAccountReauthentication\(id\)/)
-  assert.match(handlers, /accountIds.map\(accountId => clearAccountReauthentication\(accountId\)\)/)
+  assert.match(handlers, /const cleanup = captureAccountBrowserCleanup\(id\)/)
+  assert.match(handlers, /if \(deleted\) await cleanup\(\)/)
+  assert.match(handlers, /getByProviderId\(id\).map\(account => captureAccountBrowserCleanup\(account.id\)\)/)
+})
+
+function deletionHandler(channel, f, deleted = true) {
+  const source = readFileSync(join(root, 'src/main/ipc/handlers.ts'), 'utf8')
+  const ast = ts.createSourceFile('handlers.ts', source, ts.ScriptTarget.Latest, true)
+  let registration
+  function visit(node) {
+    if (ts.isCallExpression(node) && node.expression.getText(ast) === 'ipcMain.handle'
+      && node.arguments[0]?.getText(ast) === `IpcChannels.${channel}`) registration = node.getText(ast)
+    ts.forEachChild(node, visit)
+  }
+  visit(ast); assert.ok(registration)
+  let callback
+  vm.runInNewContext(ts.transpileModule(registration, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText, {
+    IpcChannels: { [channel]: channel }, ipcMain: { handle(_name, handler) { callback = handler } },
+    captureAccountBrowserCleanup: f.captureAccountBrowserCleanup,
+    AccountManager: { getByProviderId: id => f.storeManager.getAccountsByProviderId(id), delete: id => deleted && f.storeManager.deleteAccount(id) },
+    CustomProviderManager: { delete: id => {
+      if (!deleted) return false
+      for (const account of f.storeManager.getAccountsByProviderId(id)) f.storeManager.deleteAccount(account.id)
+      return f.storeManager.deleteProvider(id)
+    } },
+  })
+  return id => callback({}, id)
+}
+
+for (const channel of ['ACCOUNTS_DELETE', 'PROVIDERS_DELETE']) test(`${channel}: capture exact Arena profile before deletion even without prior reauthentication`, async () => {
+  const profileId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+  const f = fixture({ provider: { id: 'arena' }, account: { providerId: 'arena', providerUserId: undefined, credentials: { browserProfileId: profileId } } })
+  const reads = [], get = f.storeManager.getAccountById.bind(f.storeManager)
+  f.storeManager.getAccountById = (id, decrypt) => { reads.push({ id, decrypt }); return get(id, decrypt) }
+  const result = await deletionHandler(channel, f)(channel === 'ACCOUNTS_DELETE' ? 'original-account' : 'arena')
+  assert.equal(result, true)
+  assert.equal(get('original-account'), undefined)
+  assert.deepEqual(f.cleared, ['original-account', profileId])
+  assert.deepEqual(reads.filter(item => item.decrypt), [{ id: 'original-account', decrypt: true }])
+  assert.equal(f.arenaCalls.length, 0, 'cleanup never starts a login or creates a replacement profile')
+})
+
+test('deletion snapshots do not decrypt other provider credentials or close any browser after a failed deletion', async () => {
+  const f = fixture()
+  const reads = [], get = f.storeManager.getAccountById.bind(f.storeManager)
+  f.storeManager.getAccountById = (id, decrypt) => { reads.push({ id, decrypt }); return get(id, decrypt) }
+  assert.equal(await deletionHandler('ACCOUNTS_DELETE', f, false)('original-account'), false)
+  assert.ok(get('original-account'))
+  assert.equal(reads.some(item => item.decrypt), false)
+  assert.deepEqual(f.cleared, [])
+})
+
+test('real account delete handler closes its captured profile and a late Arena login cannot recreate the deleted record', async () => {
+  const profileId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', pending = deferred()
+  const f = fixture({ provider: { id: 'arena' }, account: { providerId: 'arena', providerUserId: undefined, credentials: { browserProfileId: profileId } }, arena: () => pending.promise })
+  const login = f.reauthenticateAccount('original-account')
+  assert.equal(await deletionHandler('ACCOUNTS_DELETE', f)('original-account'), true)
+  assert.deepEqual(f.cleared, ['original-account', profileId], 'captured and in-flight profile IDs are deduplicated')
+  const writesAfterDelete = f.counts().writes
+  pending.resolve({ success: true, profileId, accountInfo: { email: 'person@example.test' } })
+  assert.equal((await login).errorCode, 'account_changed')
+  assert.equal(f.storeManager.getAccountById('original-account'), undefined)
+  assert.equal(f.counts().writes, writesAfterDelete)
 })
 
 test('every token-based builtin signs in under its provider route and atomically saves canonical credentials to the original record', async () => {
@@ -319,5 +380,18 @@ test('Arena reauthentication preserves exact profile and settings, with scoped c
     pending.resolve({ success: true, profileId, accountInfo: { email: 'person@example.test' } })
     assert.equal((await task).errorCode, 'account_changed')
     assert.equal(g.counts().writes, writes)
+  }
+})
+
+test('Arena and generic re-login preserve typed browser failures and never change account credentials', async () => {
+  for (const errorCode of ['profile_unavailable', 'browser_not_found', 'browser_start_failed', 'browser_connection_failed', 'page_not_ready']) {
+    for (const providerId of ['arena', 'kimi']) {
+      const failed = async () => ({ success: false, errorCode, error: 'unrelated opaque text' })
+      const f = fixture({ provider: { id: providerId }, account: { providerId,
+        credentials: providerId === 'arena' ? { browserProfileId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' } : { token: 'fixture-token' } },
+        arena: failed, login: failed })
+      assert.equal((await f.reauthenticateAccount('original-account')).errorCode, errorCode)
+      assert.equal(f.counts().writes, 0)
+    }
   }
 })

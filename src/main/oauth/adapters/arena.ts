@@ -1,6 +1,6 @@
 import { BaseOAuthAdapter } from './base'
 import type { AdapterConfig, OAuthOptions, OAuthResult, TokenValidationResult } from '../types'
-import { arenaBrowserManager } from '../../arena/browserManager'
+import { arenaBrowserManager, ArenaBrowserFailure } from '../../arena/browserManager'
 import { arenaProfileCredentials } from '../../providers/arenaCatalog'
 import { syncArenaProviderModels } from '../../providers/arenaIntegration'
 
@@ -16,15 +16,15 @@ export class ArenaAdapter extends BaseOAuthAdapter {
     try {
       const result = await arenaBrowserManager.startLogin()
       abort.signal.throwIfAborted()
-      if (!result.success || !result.profileId) return { success: false, providerId: options.providerId, providerType: 'arena', error: result.error || 'Arena login was not completed.' }
+      if (!result.success || !result.profileId) return { success: false, providerId: options.providerId, providerType: 'arena', errorCode: result.errorCode || 'identity_unverified', error: result.error || 'Arena login was not completed.' }
       const credentials = arenaProfileCredentials({ browserProfileId: result.profileId })
       await syncArenaProviderModels(credentials.browserProfileId, abort.signal)
       abort.signal.throwIfAborted()
       this.emitProgress('success', 'Arena account verified and live text/image model catalog synchronized.')
       return { success: true, providerId: options.providerId, providerType: 'arena', credentials,
         ...(result.accountInfo ? { accountInfo: { ...result.accountInfo } } : {}) }
-    } catch {
-      return { success: false, providerId: options.providerId, providerType: 'arena', error: abort.signal.aborted ? 'Arena login cancelled.' : 'Arena login or live model discovery could not be completed. Finish sign-in and any verification prompts in its browser, then try again.' }
+    } catch (error) {
+      return { success: false, providerId: options.providerId, providerType: 'arena', errorCode: abort.signal.aborted ? 'cancelled' : error instanceof ArenaBrowserFailure ? error.errorCode : 'browser_error', error: abort.signal.aborted ? 'Arena login cancelled.' : 'Arena login or live model discovery could not be completed. Finish sign-in and any verification prompts in its browser, then try again.' }
     } finally { arenaBrowserManager.off('status', status); if (this.loginAbort === abort) this.loginAbort = null }
   }
 
@@ -32,8 +32,11 @@ export class ArenaAdapter extends BaseOAuthAdapter {
     try {
       const profile = arenaProfileCredentials(credentials)
       const status = await arenaBrowserManager.status(profile.browserProfileId)
-      return status.authenticated ? { valid: true, accountInfo: status.accountInfo } : { valid: false, error: 'Arena sign-in requires attention in its isolated browser.' }
-    } catch { return { valid: false, error: 'Use Arena browser login; imported tokens or arbitrary profile paths are not supported.' } }
+      return status.authenticated ? { valid: true, accountInfo: status.accountInfo } : {
+        valid: false, errorCode: status.errorCode || 'login_required',
+        error: status.ready === false ? 'Arena browser readiness could not be verified; this does not mean the saved account is signed out.' : 'Arena sign-in requires attention in its isolated browser.',
+      }
+    } catch (error) { return { valid: false, errorCode: error instanceof ArenaBrowserFailure ? error.errorCode : 'invalid_account', error: 'Use Arena browser login; check its original profile and browser window before trying again.' } }
   }
   async refreshToken(): Promise<null> { return null }
   override async cancelLogin(): Promise<void> { this.loginAbort?.abort(); arenaBrowserManager.cancel(); await arenaBrowserManager.cancelAndWait() }
