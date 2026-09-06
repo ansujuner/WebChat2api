@@ -9,7 +9,7 @@ const reasonKeys: Record<AccountLivenessReason, string> = {
   disabled: 'disabled', provider_disabled: 'provider_disabled', cooldown: 'cooldown', daily_limit: 'daily_limit',
   account_missing: 'account_missing', provider_missing: 'provider_missing', no_text_model: 'no_text_model',
   auth_required: 'auth_required', action_required: 'action_required', rate_limited: 'rate_limited', quota_unavailable: 'quota_unavailable',
-  browser_unavailable: 'browser_unavailable', model_unavailable: 'model_unavailable',
+  browser_unavailable: 'browser_unavailable', model_unavailable: 'model_unavailable', account_busy: 'account_busy',
   account_banned: 'account_banned', incomplete_response: 'incomplete_response', request_failed: 'request_failed',
   timeout: 'timeout', cancelled: 'cancelled', account_changed: 'account_changed', internal_error: 'internal_error',
 }

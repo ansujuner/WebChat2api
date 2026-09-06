@@ -121,6 +121,7 @@ test('safe typed failure categories preserve restriction/retry status without ra
     [503, 'quota_unavailable', 'quota_unavailable'], [504, '', 'timeout'], [502, '', 'request_failed'],
     [502, 'browser_unavailable', 'browser_unavailable'], [404, 'model_unavailable', 'model_unavailable'],
     [502, 'incomplete_response', 'incomplete_response'], [403, 'action_required', 'action_required'],
+    [409, 'account_busy', 'account_busy'], [429, 'account_busy', 'account_busy'],
   ] as const) {
     let calls = 0
     const f = fixture({ forward: async () => { calls++; return { success: false, status, errorCode, error: 'private-token-response', headers: { 'retry-after': '60' } } } })
@@ -128,6 +129,18 @@ test('safe typed failure categories preserve restriction/retry status without ra
     assert.equal(report.results[0].reason, expected); assert.equal(calls, 1)
     assert.ok(report.results[0].retryAt! > Date.now()); assert.doesNotMatch(JSON.stringify(report), /private-token/)
   }
+})
+
+test('account_busy is a pre-submission busy failure, not authentication or rate limiting, with no success accounting or retry', async () => {
+  let calls = 0
+  const f = fixture({ forward: async () => { calls++; return { success: false, status: 409, errorCode: 'account_busy', error: 'PRIVATE upstream fixture' } } })
+  const report = await f.run({ accountIds: ['a'] })
+  assert.equal(report.results[0].reason, 'account_busy')
+  assert.equal(report.results[0].status, 'failed')
+  assert.equal(report.results[0].httpStatus, 409)
+  assert.equal(report.results[0].retryAt, undefined)
+  assert.equal(calls, 1); assert.deepEqual(f.counted, [])
+  assert.doesNotMatch(JSON.stringify(report), /PRIVATE|auth_required|rate_limited/)
 })
 
 test('transport rejection fails once then continues with the next selected account, not a retry substitute', async () => {

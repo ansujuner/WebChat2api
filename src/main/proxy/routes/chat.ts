@@ -465,6 +465,7 @@ export async function handleChatCompletion(ctx: Context, responseAdapter?: { for
 
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     const errorStack = error instanceof Error ? error.stack : undefined
+    const publicErrorCode = error instanceof ConversationError ? error.code : null
     settleRequest(false, errorMessage)
 
     ctx.status = error instanceof ConversationError ? error.status : 500
@@ -473,7 +474,7 @@ export async function handleChatCompletion(ctx: Context, responseAdapter?: { for
         message: errorMessage,
         type: 'internal_error',
         param: null,
-        code: null,
+        code: publicErrorCode,
       },
     }
 
@@ -492,13 +493,18 @@ export async function handleChatCompletion(ctx: Context, responseAdapter?: { for
         message: errorMessage,
         type: 'internal_error',
         param: null,
-        code: null,
+        code: publicErrorCode,
       },
     })
-    if (!logEntryId) storeManager.addRequestLog({
+    if (logEntryId) storeManager.updateRequestLog(logEntryId, {
+      statusCode: ctx.status,
+      responseStatus: ctx.status,
+      responseBody: exceptionResponseBody,
+    })
+    else storeManager.addRequestLog({
       timestamp: startTime,
       status: 'error',
-      statusCode: 500,
+      statusCode: ctx.status,
       method: 'POST',
       url: ctx.path,
       model: request.model,
@@ -511,7 +517,7 @@ export async function handleChatCompletion(ctx: Context, responseAdapter?: { for
       userInput,
       webSearch: request.web_search,
       reasoningEffort: request.reasoning_effort,
-      responseStatus: 500,
+      responseStatus: ctx.status,
       responseBody: exceptionResponseBody,
       latency,
       isStream: request.stream || false,

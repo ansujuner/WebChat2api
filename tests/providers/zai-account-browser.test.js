@@ -391,3 +391,121 @@ test('diagnostics never claim authentication while an owned window is on another
   assert.equal(f.manager.getAccountState('account-1').authenticated, false)
   await f.manager.destroy()
 })
+
+test('API authentication rejects expired credentials without exposing or waiting on a login window', async () => {
+  const f = fixture({ respond: () => ({ status: 401 }) })
+  const pending = assert.rejects(f.manager.withChatWindow(config(), async () => assert.fail('No chat for rejected credentials')), { code: 'login_required' })
+  await tick(); await pending
+  assert.equal(f.windows.length, 1)
+  assert.equal(f.windows[0].visible, undefined)
+  assert.equal(f.windows[0].focuses, 0)
+  assert.equal(f.intervals.size, 0)
+  await f.manager.destroy()
+})
+
+test('API chats use a separate page in only their own verified session and keep the per-account lock until completion', async () => {
+  const f = fixture(), gate = deferred()
+  let apiWindow
+  const first = f.manager.withChatWindow(config(), async window => { apiWindow = window; await gate.promise; return 'done' })
+  await tick()
+  assert.ok(apiWindow)
+  assert.equal(f.windows.length, 2)
+  assert.notEqual(apiWindow, f.windows[0])
+  assert.equal(apiWindow.config.webPreferences.session, f.windows[0].config.webPreferences.session)
+  assert.equal(apiWindow.config.webPreferences.sandbox, true)
+  assert.equal(apiWindow.config.webPreferences.webSecurity, true)
+  assert.equal(apiWindow.config.show, false)
+  assert.equal(f.windows[0].focuses, 0)
+  await assert.rejects(f.manager.withChatWindow(config(), async () => assert.fail('Concurrent submit')), { code: 'account_busy' })
+  assert.equal((await f.manager.authenticate(config())).errorCode, 'busy')
+  assert.equal(f.requests.length, 1)
+  gate.resolve(); assert.equal(await first, 'done')
+  assert.equal(await f.manager.withChatWindow(config(), async window => window === apiWindow), true)
+  assert.equal(f.windows.length, 2)
+  await f.manager.destroy()
+})
+
+test('automatic website token refresh does not re-import an older saved token on the next API request', async () => {
+  const f = fixture()
+  await f.manager.withChatWindow(config(), async () => {})
+  f.setToken(0, 'fresh-website-owned-token')
+  const loads = f.windows[0].loads.length
+  await f.manager.withChatWindow(config(), async () => {})
+  assert.equal(f.windows[0].loads.length, loads)
+  assert.equal(f.sessions[0].cookieWrites.length, 1)
+  assert.equal(f.requests.at(-1).init.headers.Authorization, 'Bearer fresh-website-owned-token')
+  assert.equal(f.sessions[0].storage.get(ORIGIN).get('token'), 'fresh-website-owned-token')
+  await f.manager.destroy()
+})
+
+test('closing the login page does not cancel an already-owned API page or clear its session', async () => {
+  const f = fixture(), gate = deferred()
+  const pending = f.manager.withChatWindow(config(), async () => gate.promise)
+  await tick()
+  f.windows[0].destroy(); await tick()
+  assert.equal(f.windows[1].destroyed, false)
+  assert.equal(f.sessions[0].clears, 0)
+  assert.equal(f.manager.hasOpenBrowsers(), true)
+  gate.resolve(); await pending
+  await f.manager.destroy()
+  assert.equal(f.windows[1].destroyed, true)
+  assert.equal(f.sessions[0].clears, 1)
+})
+
+test('API page denies external navigation/popups and account deletion clears only its two owned pages', async () => {
+  const f = fixture()
+  let firstPage, secondPage
+  await f.manager.withChatWindow(config(), async window => { firstPage = window })
+  await f.manager.withChatWindow(config('account-2'), async window => { secondPage = window })
+  assert.notEqual(firstPage.config.webPreferences.session, secondPage.config.webPreferences.session)
+  assert.deepEqual(plain(firstPage.webContents.openHandler({ url: 'https://idp.example.test/' })), { action: 'deny' })
+  let prevented = false
+  firstPage.webContents.emit('will-redirect', { preventDefault() { prevented = true } }, 'https://idp.example.test/')
+  assert.equal(prevented, true)
+  await f.manager.clearAccount('account-1')
+  assert.equal(firstPage.destroyed, true)
+  assert.equal(secondPage.destroyed, false)
+  assert.equal(f.sessions[0].clears, 1)
+  assert.equal(f.sessions[1].clears, 0)
+  await f.manager.destroy()
+})
+
+test('failed API callback releases the account lock without retrying the task', async () => {
+  const f = fixture(); let calls = 0
+  await assert.rejects(f.manager.withChatWindow(config(), async () => { calls++; throw new Error('fixture failure') }), /fixture failure/)
+  assert.equal(calls, 1)
+  await f.manager.withChatWindow(config(), async () => { calls++ })
+  assert.equal(calls, 2)
+  await f.manager.destroy()
+})
+
+test('API cancellation during proxy setup settles promptly and never creates a late window', async () => {
+  const gate = deferred(), controller = new AbortController()
+  const f = fixture({ proxyWait: gate.promise })
+  const pending = assert.rejects(f.manager.withChatWindow({ ...config(), signal: controller.signal }, async () => assert.fail('Cancelled task')), { code: 'cancelled' })
+  await tick(); controller.abort(); await pending
+  gate.resolve(); await tick()
+  assert.equal(f.windows.length, 0)
+  assert.equal(f.sessions[0].cookieWrites.length, 0)
+  await f.manager.destroy()
+})
+
+test('API cancellation during profile verification does not wait for a late auth response', async () => {
+  const gate = deferred(), controller = new AbortController()
+  const f = fixture({ respond: async () => { await gate.promise; return { body: { id: 'user-1', email: 'one@example.test' } } } })
+  const pending = assert.rejects(f.manager.withChatWindow({ ...config(), signal: controller.signal }, async () => assert.fail('Cancelled task')), { code: 'cancelled' })
+  await tick(); controller.abort(); await pending
+  gate.resolve(); await tick()
+  assert.equal(f.windows.length, 1)
+  assert.equal(f.manager.getAccountState('account-1').authenticated, false)
+  await f.manager.destroy()
+})
+
+test('main account snapshot guards run before authentication and before returning a finished chat', async () => {
+  const f = fixture()
+  await assert.rejects(f.manager.withChatWindow({ ...config(), isAccountCurrent: () => false }, async () => assert.fail('Changed account')), { code: 'account_changed' })
+  assert.equal(f.windows.length, 0)
+  let current = true
+  await assert.rejects(f.manager.withChatWindow({ ...config(), isAccountCurrent: () => current }, async () => { current = false }), { code: 'account_changed' })
+  await f.manager.destroy()
+})

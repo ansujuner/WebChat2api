@@ -81,6 +81,23 @@ interface ChatCompletionRequest extends ConversationRequestOptions {
 
 const tokenCache = new Map<string, TokenInfo>()
 
+/** Only safe transport metadata crosses the adapter boundary, never upstream bodies or request configs. */
+export class GLMUpstreamError extends Error {
+  readonly status: number
+  readonly code: 'authentication_required' | 'action_required' | 'rate_limited' | 'upstream_error'
+  readonly retryAfter?: number
+  constructor(status: number, retryAfter?: unknown) {
+    const safeStatus = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 502
+    super(`GLM request failed: HTTP ${safeStatus}`)
+    this.name = 'GLMUpstreamError'
+    this.status = safeStatus
+    this.code = safeStatus === 401 ? 'authentication_required' : safeStatus === 403 ? 'action_required' : safeStatus === 429 ? 'rate_limited' : 'upstream_error'
+    if (typeof retryAfter === 'string' && /^\d{1,6}$/.test(retryAfter) && Number(retryAfter) > 0 && Number(retryAfter) <= 604800) {
+      this.retryAfter = Number(retryAfter)
+    }
+  }
+}
+
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0
@@ -149,11 +166,10 @@ export class GLMAdapter {
     )
 
     console.log('[GLM] Token response status:', response.status)
-    const { code, status, message } = response.data || {}
+    const { code, status } = response.data || {}
     const isSuccess = code === 0 || status === 0
     if (response.status !== 200 || !isSuccess) {
-      const errorMsg = message || `HTTP ${response.status}`
-      throw new Error(`Token refresh failed: ${errorMsg}`)
+      throw new GLMUpstreamError(response.status, response.headers?.['retry-after'] ?? response.headers?.['Retry-After'])
     }
 
     const { access_token, refresh_token } = response.data.result || {}
@@ -465,7 +481,7 @@ GLM STRICT RULES:
 
     if (response.status !== 200) {
       response.data?.destroy?.()
-      throw new Error(`GLM completion request failed: HTTP ${response.status}`)
+      throw new GLMUpstreamError(response.status, response.headers?.['retry-after'] ?? response.headers?.['Retry-After'])
     }
     return { response, conversationId: request.conversation?.sessionId || '' }
   }
@@ -662,7 +678,9 @@ export class GLMStreamHandler {
 
           this.observeConversation(result)
 
-          if (result.status !== 'finish' && result.status !== 'intervene') {
+          // A terminal event may include the only answer or the last part snapshot.
+          // Merge and emit its unsent suffix before flushing the terminal marker.
+          if (result.parts || cachedParts.length > 0) {
             if (result.parts) {
               result.parts.forEach((part: any) => {
                 const index = cachedParts.findIndex((p) => p.logic_id === part.logic_id)
@@ -769,7 +787,8 @@ export class GLMStreamHandler {
             }
 
             if (outputChunks.length > 0) sentRole = true
-          } else {
+          }
+          if (result.status === 'finish' || result.status === 'intervene') {
             completed = true
             // Flush any remaining tool call buffer before finishing
             const baseChunk = createBaseChunk(this.conversationId, this.model, this.created)
@@ -836,20 +855,18 @@ export class GLMStreamHandler {
 
             this.observeConversation(result)
 
-            if (result.status !== 'finish' && result.status !== 'intervene') {
-              if (result.parts) {
-                // Accumulate parts (same as handleStream), don't replace
-                // GLM sends incremental parts, each event only contains new content
-                result.parts.forEach((part: any) => {
-                  const index = cachedParts.findIndex((p) => p.logic_id === part.logic_id)
-                  if (index !== -1) {
-                    cachedParts[index] = part
-                  } else {
-                    cachedParts.push(part)
-                  }
-                })
-              }
-            } else {
+            // Merge every event, including terminal snapshots, by the same part ID as streaming.
+            if (result.parts) {
+              result.parts.forEach((part: any) => {
+                const index = cachedParts.findIndex((p) => p.logic_id === part.logic_id)
+                if (index !== -1) {
+                  cachedParts[index] = part
+                } else {
+                  cachedParts.push(part)
+                }
+              })
+            }
+            if (result.status === 'finish' || result.status === 'intervene') {
               completed = true
               const searchMap = new Map<string, any>()
               cachedParts.forEach((part) => {

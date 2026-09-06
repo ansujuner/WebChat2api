@@ -1,4 +1,4 @@
-const upstreamCategories = new Set(['captcha_required', 'verification_required', 'authentication_required', 'action_required', 'access_denied', 'account_cooling_down', 'account_unavailable', 'rate_limited', 'quota_exceeded', 'account_banned', 'model_unavailable', 'browser_unavailable', 'upstream_error', 'incomplete_response', 'transport_error'])
+const upstreamCategories = new Set(['captcha_required', 'verification_required', 'authentication_required', 'action_required', 'access_denied', 'account_cooling_down', 'account_unavailable', 'account_busy', 'conversation_cursor_missing', 'rate_limited', 'quota_exceeded', 'account_banned', 'model_unavailable', 'browser_unavailable', 'upstream_error', 'incomplete_response', 'transport_error'])
 const failureCodes = new Set(['tool_calling_disabled', 'unsaved_client_adapter', 'settings_changed', 'already_running', 'proxy_not_running', 'no_gateway_key', 'non_loopback_bind', 'health_failed', 'catalogue_failed', 'model_not_advertised', 'connection_failed_not_retried'])
 const toolFailures = new Set(['model_did_not_call_tool', 'parser_failed', 'invalid_tool_name', 'client_did_not_return_tool_result'])
 

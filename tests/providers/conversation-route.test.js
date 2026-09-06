@@ -381,6 +381,39 @@ test('HTTP incomplete JSON is counted only as failure rather than success plus f
   assert.equal(fixture.logs[0].status, 'error')
 })
 
+test('actual missing upstream cursor keeps its typed public code and 502 in both HTTP and the existing request log', async t => {
+  const fixture = await setup(t, { forward: async () => ({ success: true, status: 200, body: complete('A complete answer without a provider cursor') }) })
+  const response = await fixture.post({ model: 'fixture-model', messages: [user('fixture input')] })
+  assert.equal(response.status, 502)
+  assert.equal((await response.json()).error.code, 'conversation_cursor_missing')
+  assert.equal(fixture.calls.length, 1)
+  assert.equal(fixture.logs.length, 1, 'The original log is corrected, not duplicated')
+  assert.equal(fixture.logs[0].status, 'error')
+  assert.equal(fixture.logs[0].statusCode, 502)
+  assert.equal(fixture.logs[0].responseStatus, 502)
+  assert.equal(JSON.parse(fixture.logs[0].responseBody).error.code, 'conversation_cursor_missing')
+  assert.equal(fixture.counters.success, 0); assert.equal(fixture.counters.failure, 1)
+})
+
+test('typed early conversation exceptions retain safe codes while untyped status/code properties remain private', async t => {
+  const { ConversationError } = await import(pathToFileURL(join(root, 'src/main/proxy/conversationContinuity.ts')))
+  for (const typed of [true, false]) {
+    const fixture = await setup(t, { forward: async () => {
+      throw typed ? new ConversationError('Fixture could not continue.', 'conversation_cursor_missing', 502)
+        : Object.assign(new Error('Fixture exception.'), { code: 'PRIVATE-UNTRUSTED-CODE', status: 418 })
+    } })
+    const response = await fixture.post({ model: 'fixture-model', messages: [user('fixture input')] })
+    const body = await response.json()
+    assert.equal(response.status, typed ? 502 : 500)
+    assert.equal(body.error.code, typed ? 'conversation_cursor_missing' : null)
+    assert.equal(fixture.logs.length, 1)
+    assert.equal(fixture.logs[0].statusCode, response.status)
+    assert.equal(fixture.logs[0].responseStatus, response.status)
+    assert.equal(JSON.parse(fixture.logs[0].responseBody).error.code, body.error.code)
+    assert.doesNotMatch(JSON.stringify(body) + fixture.logs[0].responseBody, /PRIVATE-UNTRUSTED-CODE/)
+  }
+})
+
 test('HTTP disconnect before upstream headers releases accounting and destroys a late source once returned', async t => {
   let enter, release
   const entered = new Promise(resolve => { enter = resolve })

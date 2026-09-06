@@ -28,6 +28,33 @@ vm.runInNewContext(ts.transpileModule(errorDeclaration.getText(zaiAst), { compil
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
 } }).outputText, { exports: errorModule.exports, Error })
 const { ZaiUpstreamError } = errorModule.exports
+const glmSource = readFileSync(path.join(__dirname, '../../src/main/proxy/adapters/glm.ts'), 'utf8')
+const glmAst = ts.createSourceFile('glm.ts', glmSource, ts.ScriptTarget.Latest, true)
+const glmErrorDeclaration = glmAst.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'GLMUpstreamError')
+const glmErrorModule = { exports: {} }
+vm.runInNewContext(ts.transpileModule(glmErrorDeclaration.getText(glmAst), { compilerOptions: {
+  target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
+} }).outputText, { exports: glmErrorModule.exports, Error })
+const { GLMUpstreamError } = glmErrorModule.exports
+
+function realZaiHandler() {
+  const module = { exports: {} }
+  const imports = {
+    '../utils/streamToolHandler': {
+      createToolCallState: () => ({ hasEmittedToolCall: false }),
+      createBaseChunk: (id, model, created) => ({ id, model, created, object: 'chat.completion.chunk' }),
+      processStreamContent: (content, state, base) => ({ chunks: [{ ...base, choices: [{ index: 0, delta: { content }, finish_reason: null }] }] }),
+      flushToolCallBuffer: () => [],
+    },
+  }
+  vm.runInNewContext(ts.transpileModule(zaiSource, { compilerOptions: {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
+  } }).outputText, { module, exports: module.exports, Buffer, setTimeout, clearTimeout,
+    console: { log() {}, warn() {}, error() {} },
+    require: name => Object.hasOwn(imports, name) ? imports[name] : name.startsWith('.') ? {} : require(name),
+  })
+  return module.exports.ZaiStreamHandler
+}
 
 function fixture(providerId = 'deepseek', options = {}) {
   let account = { id: 'fixture-account', providerId, enabled: false, status: 'expired',
@@ -72,7 +99,7 @@ function fixture(providerId = 'deepseek', options = {}) {
         captured.push({ id, request })
         if (options.beforeResponse) await options.beforeResponse()
         if (options.error) throw options.error
-        const data = options.raw ?? Readable.from([])
+        const data = options.websiteStream ? options.websiteStream(request) : options.raw ?? Readable.from([])
         const response = { status: options.responseStatus ?? 200, headers: {}, data: id === 'minimax' ? answer() : data }
         if (id === 'perplexity') return { stream: data, sessionId: 'new-probe-only' }
         return { response, sessionId: 'new-probe-only', conversationId: 'new-probe-only', chatId: 'new-probe-only', query: 'probe' }
@@ -98,7 +125,11 @@ function fixture(providerId = 'deepseek', options = {}) {
       }
     }
     imports[`./adapters/${id}`] = { [`${label}Adapter`]: Adapter, [`${label}StreamHandler`]: Handler }
-    if (id === 'zai') imports[`./adapters/${id}`].ZaiUpstreamError = ZaiUpstreamError
+    if (id === 'zai') {
+      imports[`./adapters/${id}`].ZaiUpstreamError = ZaiUpstreamError
+      if (options.actualZaiHandler) imports[`./adapters/${id}`].ZaiStreamHandler = realZaiHandler()
+    }
+    if (id === 'glm') imports[`./adapters/${id}`].GLMUpstreamError = GLMUpstreamError
     if (['deepseek', 'perplexity', 'arena'].includes(id)) imports[`./adapters/${id}-stream`] = { [`${label}StreamHandler`]: Handler }
   }
   const module = { exports: {} }
@@ -148,6 +179,54 @@ test('custom probe sends max_tokens 32 once, takes fresh credentials, and never 
   assert.deepEqual(plain(config.data), { model: 'actual-model', messages: [{ role: 'user', content: '你好，请只回复 OK。' }], stream: false, max_tokens: 32 })
   assert.equal(config.headers.Authorization, `Bearer ${f.account().credentials.token}`)
   assert.deepEqual(f.changes, [])
+})
+
+test('Z.ai guard binds account identity/revision and provider existence, not natural token refresh or user preferences', async () => {
+  const f = fixture('zai', { account: { credentialRevision: 4, email: 'fixture@example.invalid', providerUserId: 'fixture-user' } })
+  assert.equal((await f.run()).success, true)
+  const guard = f.captured[0].request.isAccountCurrent
+  assert.equal(typeof guard, 'function')
+  assert.equal(guard(), true)
+  const initial = f.account()
+  for (const updates of [{ credentials: { token: 'fresh-website-token' } }, { name: 'New label' }, { enabled: true },
+    { todayUsed: 5, cooldownUntil: Date.now() + 5000 }]) {
+    f.replaceAccount({ ...initial, ...updates })
+    assert.equal(guard(), true, 'same account metadata remains bound')
+  }
+  for (const updates of [{ credentialRevision: 5 }, { email: 'different@example.invalid' }, { providerUserId: 'different-user' },
+    { providerId: 'glm' }, { id: 'different-account' }]) {
+    f.replaceAccount({ ...initial, ...updates })
+    assert.equal(guard(), false, 'explicit account/identity changes invalidate the submission')
+  }
+  f.replaceAccount(initial)
+  f.removeProvider()
+  assert.equal(guard(), false)
+  assert.doesNotMatch(JSON.stringify(f.captured[0].request), /isAccountCurrent/)
+})
+
+for (const stream of [false, true]) test(`Z.ai ${stream ? 'stream' : 'nonstream'} graph-verified cursor cannot be overwritten by conflicting terminal SSE IDs`, async () => {
+  const f = fixture('zai', { actualZaiHandler: true, allowToolEngine: true,
+    websiteStream: request => Readable.from((async function* () {
+      yield Buffer.from('data: {"type":"chat:completion","data":{"phase":"answer","delta_content":"OK"}}\n\n')
+      // The website bridge reports its authoritative GET /chats graph before releasing the terminal tail.
+      request.onConversation({ sessionId: 'new-probe-only', parentMessageId: 'verified-graph-assistant' })
+      yield Buffer.from('data: {"type":"chat:completion","data":{"role":"assistant","id":"unverified-sse-id","phase":"done","done":true}}\n\n')
+    })()),
+  })
+  const tracker = new continuity.ConversationContinuity()
+  const turn = tracker.begin({ model: 'model', stream, messages: [{ role: 'user', content: 'First' }] }, 'fixture')
+  turn.bind({ providerId: 'zai', accountId: 'fixture-account', actualModel: 'model', kind: 'zai' })
+  const result = await f.forwarder.forwardZai(turn.request, f.account(), f.provider(), 'model', Date.now())
+  assert.equal(result.success, true, result.error)
+  if (stream) {
+    let text = ''
+    for await (const chunk of result.stream) text += chunk.toString()
+    assert.match(text, /\[DONE\]/)
+  } else assert.equal(result.body.choices[0].message.content, 'OK')
+  turn.commit({ role: 'assistant', content: 'OK' })
+  const next = tracker.begin({ model: 'model', session_id: turn.id, messages: [{ role: 'user', content: 'Next' }] }, 'fixture')
+  assert.equal(continuity.getConversationOptions(next.request).conversation.parentMessageId, 'verified-graph-assistant')
+  next.cancel()
 })
 
 for (const [name, account, code, status] of [
@@ -313,7 +392,25 @@ const zaiCategories = [
   ['quota_exceeded', 429, 'rate_limited'], ['upstream_error', 502, 'upstream_error'],
   ['invalid_json', 502, 'incomplete_response'], ['unexpected_json', 502, 'incomplete_response'],
   ['incomplete_stream', 502, 'incomplete_response'], ['transport_error', 502, 'transport_error'],
+  ['browser_unavailable', 503, 'browser_unavailable'], ['account_busy', 409, 'account_busy'],
+  ['account_changed', 409, 'account_probe_selection_changed'], ['invalid_request', 400, 'invalid_request'],
+  ['unsupported_options', 400, 'unsupported_options'], ['cancelled', 408, 'account_probe_cancelled'],
+  ['protocol_mismatch', 502, 'incomplete_response'],
 ]
+for (const [status, code] of [[401, 'authentication_required'], [403, 'action_required'], [429, 'rate_limited'], [502, 'upstream_error']]) {
+  test(`GLM ${status} retains safe failure classification for account liveness`, async () => {
+    const error = new GLMUpstreamError(status, status === 429 ? '120' : undefined)
+    error.message = 'PRIVATE auth token and remote prose'
+    const f = fixture('glm', { error })
+    const result = await f.run()
+    assert.equal(result.success, false)
+    assert.equal(result.status, status)
+    assert.equal(result.errorCode, code)
+    assert.equal(result.headers?.['retry-after'], status === 429 ? '120' : undefined)
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE|token|prose/)
+    assert.equal(f.captured.length, 1, 'an auth failure is not silently retried')
+  })
+}
 test('probe mapping covers exactly the typed Z.ai failure category enum', () => {
   const declaration = zaiAst.statements.find(node => ts.isTypeAliasDeclaration(node) && node.name.text === 'ZaiFailureCategory')
   assert.deepEqual([...declaration.getText(zaiAst).matchAll(/'([a-z_]+)'/g)].map(match => match[1]).sort(),

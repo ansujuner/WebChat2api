@@ -62,13 +62,15 @@ function parseObject(text: string): Record<string, any> | undefined {
 }
 
 const UPSTREAM_MESSAGES: Record<string, string> = {
-  captcha_required: '供应商要求完成验证码；请在该账号的登录窗口完成验证后再测试。',
-  verification_required: '供应商要求完成浏览器验证；请打开该账号的登录窗口处理后再测试。',
-  action_required: '供应商要求登录或验证；请在该账号的登录窗口处理后再测试。',
+  captcha_required: '聊天请求被验证码拦截；请查看该账号实际聊天/验证窗口，有官网验证提示时手动处理。可能尚无可见窗口或提示；网页已登录不代表聊天验证通过。',
+  verification_required: '聊天请求需要浏览器验证；请查看该账号实际聊天/验证窗口，有官网验证提示时手动处理。可能尚无可见窗口或提示；网页已登录不代表聊天验证通过。',
+  action_required: '聊天请求需要额外检查；请查看该账号实际聊天/验证窗口的官网提示。可能尚无可见窗口或提示；网页已登录不代表聊天验证通过。',
   authentication_required: '账号登录已失效或 API 密钥无效；请重新登录或更新密钥。',
   access_denied: '供应商拒绝了当前账号的访问；请先在官网检查账号状态。',
   account_cooling_down: '账号处于临时封禁或冷却期；到期前不会继续提交测试。',
   account_unavailable: '当前没有可用账号；请检查账号启用状态、登录状态及使用额度。',
+  account_busy: '该账号正在处理另一项操作，当前请求未发送；请等待当前操作结束后再试，不是额度限制。',
+  conversation_cursor_missing: '供应商未返回可靠的续聊编号，无法安全继续当前对话；需要检查会话兼容性，不是验证码问题。',
   account_banned: '供应商已停用该账号；请先在官网处理账号限制。',
   rate_limited: '账号或模型触发调用频率限制；请等待额度恢复后再测试。',
   quota_exceeded: '账号额度已用尽；请等待额度恢复或检查供应商用量。',

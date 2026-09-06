@@ -7,6 +7,16 @@ The original copyright and **GPL-3.0-or-later** grant are retained in
 
 ## Changes from the supplied project
 
+- v1.6.4 (2026-09-06): routed Z.ai account liveness and API chat through the
+  account's normal website submission flow instead of an independent request
+  with fabricated browser metadata. Added isolated API pages, bounded response
+  capture, identity checks, per-account submission locks and cancellation;
+  verification prompts no longer incorrectly point only to the login page.
+  Continuation cursors are verified against the submitted chat's saved message
+  graph before completion; missing cursors retain their diagnostic error code.
+  Also fixed GLM terminal-frame content loss and preserved authentication and
+  rate-limit HTTP errors. Live availability remains subject to website checks.
+
 - v1.6.3 (2026-09-06): added account-bound Z.ai browser restoration using only
   that account's saved credentials. Website identity, not a JWT shape or an
   opened window, gates an atomic save to the original account. The website stays

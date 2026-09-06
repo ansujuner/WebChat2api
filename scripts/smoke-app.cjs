@@ -389,7 +389,6 @@ function runChild() {
 
     await require('./smoke-custom-tools.cjs')({ invoke, check, port })
     await require('./smoke-account-relogin.cjs')({ invoke, check, ipcMain })
-    await require('./smoke-zai-account-browser.cjs')({ invoke, check, app, BrowserWindow })
 
     // Fake account in the isolated profile only. Never validate it against a provider.
     const account = await invoke('window.electronAPI.accounts.add({providerId:"deepseek", name:"isolated-scheduling-fixture", credentials:{token:"fixture-not-a-real-token"}})')
@@ -430,6 +429,7 @@ function runChild() {
     check('proxy-stop-via-ipc')
     check('stopped-ipc-status-shows-new-configured-port')
     await verifyAccountLiveness()
+    await require('./smoke-zai-account-browser.cjs')({ invoke, check, app, BrowserWindow, port, request })
     assert.ok(inside(os.homedir(), fixture) && inside(app.getPath('userData'), fixture))
     check('profile-boundary-retained')
   }

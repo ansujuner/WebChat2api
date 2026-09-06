@@ -14,7 +14,7 @@ import { accountAvailability } from '../../shared/accountAvailability'
 import { DeepSeekAccountRestrictionError, type DeepSeekRestriction } from './adapters/deepseek-restrictions'
 import { DeepSeekAdapter } from './adapters/deepseek'
 import { DeepSeekStreamHandler } from './adapters/deepseek-stream'
-import { GLMAdapter, GLMStreamHandler } from './adapters/glm'
+import { GLMAdapter, GLMStreamHandler, GLMUpstreamError } from './adapters/glm'
 import { KimiAdapter, KimiStreamHandler } from './adapters/kimi'
 import { MimoAdapter, MimoStreamHandler } from './adapters/mimo'
 import { QwenAdapter, QwenStreamHandler } from './adapters/qwen'
@@ -872,6 +872,12 @@ export class RequestForwarder {
       }
     } catch (error) {
       const latency = Date.now() - startTime
+      if (typeof GLMUpstreamError === 'function' && error instanceof GLMUpstreamError) {
+        return {
+          success: false, status: error.status, errorCode: error.code, error: `GLM upstream ${error.code}`,
+          ...(error.retryAfter !== undefined ? { headers: { 'retry-after': String(error.retryAfter) } } : {}), latency,
+        }
+      }
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -1178,9 +1184,23 @@ export class RequestForwarder {
     console.log('[forwardZai] provider.modelMappings:', provider.modelMappings)
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
+      // Automatic same-identity webpage token refresh is not a user credential edit.
+      // Bind only immutable account metadata; never copy plaintext credentials into this guard.
+      const expected = { id: account.id, providerId: account.providerId, revision: account.credentialRevision ?? 0,
+        email: account.email, userId: account.providerUserId, providerType: provider.type }
+      const isAccountCurrent = (): boolean => {
+        try {
+          const current = storeManager.getAccountById(expected.id)
+          const currentProvider = storeManager.getProviderById(expected.providerId)
+          return !!current && current.id === expected.id && current.providerId === expected.providerId
+            && (current.credentialRevision ?? 0) === expected.revision && current.email === expected.email
+            && current.providerUserId === expected.userId && currentProvider?.id === expected.providerId
+            && currentProvider.type === expected.providerType
+        } catch { return false }
+      }
       
       const adapter = new ZaiAdapter(provider, account)
-      const { response, chatId, requestId } = await adapter.chatCompletion({
+      const { response, chatId } = await adapter.chatCompletion({
         ...getForwardConversationOptions(request),
         model: actualModel,
         originalModel: request.model,
@@ -1189,6 +1209,8 @@ export class RequestForwarder {
         temperature: request.temperature,
         web_search: request.web_search,
         reasoning_effort: request.reasoning_effort,
+        proxyMode: storeManager.getConfig().oauthProxyMode === 'none' ? 'none' : 'system',
+        isAccountCurrent,
       })
       const responseData = this.bindProbeCancellation(request, response.data)
 
@@ -1217,7 +1239,8 @@ export class RequestForwarder {
         : undefined
 
       const handler = new ZaiStreamHandler(actualModel, deleteChatCallback, transformed.plan)
-      attachConversationListener(request, handler)
+      // The website bridge verifies the persisted graph before releasing its terminal tail.
+      // It is the only authoritative cursor source here: an SSE role/id must not overwrite it.
       handler.setChatId(chatId)
       
       if (request.stream === true) {
@@ -1269,6 +1292,13 @@ export class RequestForwarder {
             case 'unexpected_json':
             case 'incomplete_stream': errorCode = 'incomplete_response'; break
             case 'transport_error': errorCode = 'transport_error'; break
+            case 'browser_unavailable': status = 503; errorCode = 'browser_unavailable'; break
+            case 'account_busy': status = 409; errorCode = 'account_busy'; break
+            case 'account_changed': status = 409; errorCode = 'account_probe_selection_changed'; break
+            case 'invalid_request':
+            case 'unsupported_options': status = 400; errorCode = error.category; break
+            case 'cancelled': status = 408; errorCode = 'account_probe_cancelled'; break
+            case 'protocol_mismatch': errorCode = 'incomplete_response'; break
             case 'upstream_error': break
           }
         }

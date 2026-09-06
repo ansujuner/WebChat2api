@@ -70,6 +70,7 @@ const completeReply = (result: ForwardResult): boolean => {
     choice.message.content.trim().length > 0 && Buffer.byteLength(choice.message.content, 'utf8') <= 65536
 }
 function failureReason(result: ForwardResult): AccountLivenessReason {
+  if (result.errorCode === 'account_busy') return 'account_busy'
   if (result.errorCode === 'account_banned') return 'account_banned'
   if (result.errorCode === 'account_temporarily_suspended' || result.errorCode === 'account_cooldown') return 'cooldown'
   if (result.errorCode === 'quota_unavailable') return 'quota_unavailable'
@@ -261,8 +262,8 @@ export function summarizeAccountLivenessJob(job: AccountLivenessJob) {
       ...(result.httpStatus ? { httpStatus: result.httpStatus } : {}), ...(result.latencyMs !== undefined ? { latencyMs: result.latencyMs } : {}),
       ...(result.retryAt ? { retryAt: result.retryAt } : {}) })) }
 }
-export async function runAccountLivenessProbe() {
-  const job = await startAccountLiveness({})
+export async function runAccountLivenessProbe(input: unknown = {}) {
+  const job = await startAccountLiveness(input)
   const result = await waitForAccountLiveness(job.id)
   if (!result) throw new Error('Account liveness report is no longer available.')
   return summarizeAccountLivenessJob(result)

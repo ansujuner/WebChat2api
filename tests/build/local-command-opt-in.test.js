@@ -6,6 +6,12 @@ const vm = require('node:vm')
 const ts = require('typescript')
 const root = join(__dirname, '../..')
 const plain = value => JSON.parse(JSON.stringify(value))
+const livenessSource = ts.createSourceFile('accountLiveness.ts', readFileSync(join(root, 'src/main/diagnostics/accountLiveness.ts'), 'utf8'), ts.ScriptTarget.Latest, true)
+const summaryDeclaration = livenessSource.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'summarizeAccountLivenessJob')
+assert.ok(summaryDeclaration)
+const summaryModule = { exports: {} }
+vm.runInNewContext(ts.transpileModule(summaryDeclaration.getText(livenessSource), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
+  { module: summaryModule, exports: summaryModule.exports })
 
 // Execute the real app entry point with only local in-memory fakes. No Electron
 // process, user profile, proxy setting, filesystem write or generation is used.
@@ -52,6 +58,15 @@ function application(options = {}) {
       await save({ live: false, stream: false, protocol: 'openai', status: 'awaiting_login', chatTested: false })
       return { live: false, stream: false, protocol: 'openai', status: 'passed', accountVerified: true, chatTested: false }
     } },
+    './diagnostics/accountLiveness': {
+      runAccountLivenessProbe: async input => {
+        calls.push({ operation: 'accountProbe', input: plain(input) })
+        if (options.accountFailure) throw Error('fixture-private-account-error')
+        return { status: 'passed', state: 'completed', counts: { total: 1, passed: 1, failed: 0, skipped: 0, cancelled: 0 }, checks: [] }
+      },
+      getAccountLiveness: async () => { calls.push({ operation: 'accountStatus' }); if (options.accountFailure) throw Error('fixture-private-account-error'); return options.accountJob ?? null },
+      summarizeAccountLivenessJob: summaryModule.exports.summarizeAccountLivenessJob,
+    },
     './arena/browserManager': { arenaBrowserManager: {
       hasOpenBrowsers: () => !!options.arenaOpen,
       destroy: async () => { calls.push({ operation: 'closeArena' }); if (options.closeArena) await options.closeArena() },
@@ -218,7 +233,7 @@ test('ordinary app startup and ordinary second-instance focus never start a diag
 })
 
 test('command-only helper refuses to boot a new app/profile when no existing instance accepts it', async () => {
-  for (const flag of ['--chat2api-probe=catalog', '--chat2api-probe=live', '--chat2api-probe=stream', '--chat2api-probe=deepseek', '--chat2api-probe=login', '--chat2api-probe=tools', '--chat2api-quit']) {
+  for (const flag of ['--chat2api-probe=catalog', '--chat2api-probe=live', '--chat2api-probe=stream', '--chat2api-probe=deepseek', '--chat2api-probe=login', '--chat2api-probe=tools', '--chat2api-probe=zai-liveness', '--chat2api-probe=accounts-status', '--chat2api-quit']) {
     const fixture = application({ argv: ['fixture-electron.exe', flag] })
     await fixture.ready()
     assert.deepEqual(fixture.calls, [])
@@ -228,7 +243,7 @@ test('command-only helper refuses to boot a new app/profile when no existing ins
 })
 
 test('a helper which fails the single-instance lock never initializes or runs commands itself', async () => {
-  for (const mode of ['catalog', 'live', 'stream', 'deepseek', 'login', 'tools']) {
+  for (const mode of ['catalog', 'live', 'stream', 'deepseek', 'login', 'tools', 'zai-liveness', 'accounts-status']) {
     const fixture = application({ lock: false, argv: ['fixture-electron.exe', `--chat2api-probe=${mode}`] })
     await fixture.ready()
     assert.deepEqual(fixture.calls, [])
@@ -444,4 +459,67 @@ test('unknown tools flag variants never submit a tool smoke request', async () =
   await fixture.ready()
   for (const flag of ['--chat2api-probe=TOOLS', '--chat2api-probe=tool', '--chat2api-probe=tools-extra', 'prefix--chat2api-probe=tools']) await fixture.second(['fixture-electron.exe', flag])
   assert.deepEqual(fixture.calls, [{ operation: 'initialize' }])
+})
+
+test('Zai liveness is scoped to its provider and never falls back to all accounts, proxy startup or other probes', async () => {
+  const fixture = application()
+  await fixture.ready()
+  await fixture.second(['fixture-electron.exe', '--chat2api-probe=zai-liveness'])
+  assert.deepEqual(fixture.calls, [{ operation: 'initialize' }, { operation: 'accountProbe', input: { providerId: 'zai' } }])
+  const final = fixture.writes.at(-1)
+  assert.ok(final.file.endsWith('proxy-zai-liveness-probe.json'))
+  assert.equal(final.data.live, true); assert.equal(final.data.stream, false); assert.equal(final.data.protocol, 'openai')
+  await fixture.second(['fixture-electron.exe', '--chat2api-probe=accounts'])
+  assert.deepEqual(fixture.calls.at(-1), { operation: 'accountProbe', input: {} })
+})
+
+test('account status reads and summarizes the existing job without generation, waiting, restart or identity export', async () => {
+  for (const state of ['running', 'completed', 'cancelled']) {
+    const fixture = application({ accountJob: { id: 'SECRET-JOB-ID', state, mode: 'batch', startedAt: 1, updatedAt: 2,
+      results: [{ accountId: 'SECRET-ACCOUNT-ID', accountName: 'PRIVATE@example.test', providerId: 'zai', status: 'failed',
+        reason: 'action_required', httpStatus: 403, latencyMs: 27, credentials: { token: 'SECRET-TOKEN' }, response: 'SECRET-REPLY' }] } })
+    await fixture.ready()
+    await fixture.second(['fixture-electron.exe', '--chat2api-probe=accounts-status'])
+    assert.deepEqual(fixture.calls, [{ operation: 'initialize' }, { operation: 'accountStatus' }])
+    const final = fixture.writes.at(-1)
+    assert.ok(final.file.endsWith('proxy-accounts-status-probe.json'))
+    assert.equal(final.data.live, false); assert.equal(final.data.stream, false); assert.equal(final.data.protocol, 'openai')
+    assert.equal(final.data.state, state); assert.equal(final.data.status, 'needs_attention')
+    assert.deepEqual(final.data.counts, { total: 1, passed: 0, failed: 1, skipped: 0, cancelled: 0 })
+    assert.deepEqual(final.data.checks, [{ provider: 'zai', status: 'failed', reason: 'action_required', httpStatus: 403, latencyMs: 27 }])
+    assert.doesNotMatch(JSON.stringify(fixture.writes), /SECRET|PRIVATE|accountId|accountName|credentials/)
+  }
+})
+
+test('account status without any prior job reports no_result and never starts a check', async () => {
+  const fixture = application()
+  await fixture.ready(); await fixture.second(['fixture-electron.exe', '--chat2api-probe=accounts-status'])
+  assert.deepEqual(fixture.calls, [{ operation: 'initialize' }, { operation: 'accountStatus' }])
+  assert.equal(fixture.writes.at(-1).data.status, 'no_result')
+  assert.equal(fixture.writes.at(-1).data.live, false)
+})
+
+test('new account modes enforce readiness/writability and fail safely without retries or fallback generation', async () => {
+  for (const mode of ['zai-liveness', 'accounts-status']) {
+    const early = application()
+    await early.second(['fixture-electron.exe', `--chat2api-probe=${mode}`]); assert.deepEqual(early.calls, [])
+    await early.ready(); assert.equal(early.calls.length, 2)
+    const unwritable = application({ mkdirFailure: true })
+    await unwritable.ready(); await unwritable.second(['fixture-electron.exe', `--chat2api-probe=${mode}`])
+    assert.deepEqual(unwritable.calls, [{ operation: 'initialize' }])
+    const failed = application({ accountFailure: true })
+    await failed.ready(); await failed.second(['fixture-electron.exe', `--chat2api-probe=${mode}`])
+    assert.equal(failed.calls.length, 2)
+    assert.equal(failed.writes.at(-1).data.status, 'local_probe_failed')
+    assert.equal(failed.writes.at(-1).data.live, mode === 'zai-liveness')
+    assert.doesNotMatch(JSON.stringify(failed.writes) + failed.logs.join('\n'), /fixture-private/)
+  }
+})
+
+test('ambiguous or misspelled account mode names never dispatch a generation', async () => {
+  const fixture = application(); await fixture.ready()
+  for (const flag of ['--chat2api-probe=Zai-Liveness', '--chat2api-probe=zai-liveness-extra', '--chat2api-probe=account-status', '--chat2api-probe=accounts-status-extra', 'prefix--chat2api-probe=zai-liveness']) {
+    await fixture.second(['fixture-electron.exe', flag])
+  }
+  assert.deepEqual(fixture.calls, [{ operation: 'initialize' }]); assert.deepEqual(fixture.writes, [])
 })

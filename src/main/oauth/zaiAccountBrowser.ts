@@ -10,12 +10,17 @@ const LOGIN_TIMEOUT = 5 * 60 * 1000
 const POLL_INTERVAL = 2000
 
 export type ZaiAccountBrowserError = 'cancelled' | 'timeout' | 'identity_mismatch' | 'identity_unverified'
-  | 'login_required' | 'network_error' | 'browser_error' | 'account_changed'
+  | 'login_required' | 'network_error' | 'browser_error' | 'account_changed' | 'busy'
 export interface ZaiAccountBrowserOptions {
   accountId: string
   credentials: Record<string, string>
   expectedIdentity: { userId?: string; email?: string }
   proxyMode?: 'system' | 'none'
+  /** API requests verify silently and never wait for an interactive login. */
+  interactive?: boolean
+  signal?: AbortSignal
+  /** Main-process snapshot guard, never accepted from website or renderer JSON. */
+  isAccountCurrent?: () => boolean
 }
 export interface ZaiAccountBrowserResult {
   success: boolean
@@ -30,11 +35,15 @@ interface Operation {
   timer?: ReturnType<typeof setTimeout>
   poll?: ReturnType<typeof setInterval>
   checking: boolean
+  interactive: boolean
+  removeAbort?: () => void
 }
 interface AccountBrowser {
   accountId: string
   session: Session
   window?: BrowserWindow
+  chatWindow?: BrowserWindow
+  canFocus: boolean
   children: Set<BrowserWindow>
   ready: Promise<void>
   operation?: Operation
@@ -44,6 +53,7 @@ interface AccountBrowser {
   stage: 'opening' | 'loading' | 'seeding_storage' | 'seeding_cookie' | 'reloading' | 'checking' | 'waiting_login' | 'ready'
   nativeErrorCode?: string
   verificationFailure?: 'metadata_invalid' | 'source_changed' | 'identity_mismatch' | 'login_required' | 'network_error' | 'origin_changed' | 'browser_error'
+  /** Last imported saved token; webpage refreshes must not cause re-import of an older saved token. */
   importedFingerprint?: string
 }
 
@@ -109,13 +119,18 @@ function verificationScript(): string {
 
 export class ZaiAccountBrowserManager {
   private accounts = new Map<string, AccountBrowser>()
+  private chatLocks = new Set<string>()
 
   authenticate(options: ZaiAccountBrowserOptions): Promise<ZaiAccountBrowserResult> {
     if (!options || typeof options.accountId !== 'string' || !options.accountId.trim() || options.accountId.length > 256
       || !options.credentials || typeof options.credentials !== 'object'
+      || (options.interactive !== undefined && typeof options.interactive !== 'boolean')
+      || (options.isAccountCurrent !== undefined && typeof options.isAccountCurrent !== 'function')
       || (options.proxyMode !== undefined && !['system', 'none'].includes(options.proxyMode))) {
       return Promise.resolve({ success: false, errorCode: 'browser_error' })
     }
+    if (options.signal?.aborted) return Promise.resolve({ success: false, errorCode: 'cancelled' })
+    if (this.chatLocks.has(options.accountId) && options.interactive !== false) return Promise.resolve({ success: false, errorCode: 'busy' })
     const expected = options.expectedIdentity ?? {}
     const userId = accountUserId(expected.userId)
     const email = accountEmail(expected.email)
@@ -123,12 +138,15 @@ export class ZaiAccountBrowserManager {
       return Promise.resolve({ success: false, errorCode: 'identity_unverified' })
     }
     let entry = this.accounts.get(options.accountId)
-    if (entry?.operation) { this.focus(entry); return entry.operation.promise }
+    if (entry?.operation) {
+      if (options.interactive === false) return Promise.resolve({ success: false, errorCode: 'busy' })
+      entry.canFocus = true; this.focus(entry); return entry.operation.promise
+    }
     if (!entry) {
       try {
         entry = {
           accountId: options.accountId, session: session.fromPartition(`zai-account-${randomUUID()}`),
-          children: new Set(), ready: Promise.resolve(), disposed: false, initializing: true, authenticated: false, stage: 'opening',
+          children: new Set(), ready: Promise.resolve(), disposed: false, initializing: true, authenticated: false, stage: 'opening', canFocus: options.interactive !== false,
         }
         this.accounts.set(options.accountId, entry)
       } catch { return Promise.resolve({ success: false, errorCode: 'browser_error' }) }
@@ -136,18 +154,24 @@ export class ZaiAccountBrowserManager {
     const current = entry
     let resolve!: Operation['resolve']
     const promise = new Promise<ZaiAccountBrowserResult>(done => { resolve = done })
-    const operation: Operation = { promise, resolve, expectedIdentity: { userId, email }, checking: false }
+    const operation: Operation = { promise, resolve, expectedIdentity: { userId, email }, checking: false, interactive: options.interactive !== false }
+    current.canFocus = operation.interactive
     current.operation = operation
+    if (options.signal) {
+      const abort = () => this.finish(current, operation, { success: false, errorCode: 'cancelled' })
+      options.signal.addEventListener('abort', abort, { once: true })
+      operation.removeAbort = () => options.signal!.removeEventListener('abort', abort)
+    }
     current.initializing = true
     current.authenticated = false
     current.nativeErrorCode = undefined
     current.verificationFailure = undefined
-    operation.timer = setTimeout(() => this.finish(current, operation, { success: false, errorCode: 'timeout' }), LOGIN_TIMEOUT)
+    operation.timer = setTimeout(() => this.finish(current, operation, { success: false, errorCode: 'timeout' }), operation.interactive ? LOGIN_TIMEOUT : 30000)
     this.focus(current)
     const savedToken = tokenValue(options.credentials.token)
     const work = current.ready.then(async () => {
       if (!this.current(current, operation)) return
-      if (!current.window) await this.createWindow(current, options.proxyMode ?? 'system')
+      if (!current.window) await this.createWindow(current, options.proxyMode ?? 'system', operation)
       if (!this.current(current, operation)) return
       // Reuse a live account browser, but import an explicitly changed encrypted account token.
       if (savedToken && fingerprint(savedToken) !== current.importedFingerprint) {
@@ -164,9 +188,51 @@ export class ZaiAccountBrowserManager {
     return promise
   }
 
+  /** One dedicated API page per account, sharing only that account's verified website session.
+   * The callback owns its complete response lifetime; no queued or fallback submission is made.
+   */
+  async withChatWindow<T>(options: ZaiAccountBrowserOptions, task: (window: BrowserWindow) => Promise<T>): Promise<T> {
+    const fail = (code: string): never => { throw Object.assign(new Error(`Z.ai website ${code}`), { code }) }
+    if (!options || typeof options.accountId !== 'string' || typeof task !== 'function') return fail('invalid_request')
+    const accountId = options.accountId
+    if (this.chatLocks.has(accountId) || this.accounts.get(accountId)?.operation) return fail('account_busy')
+    this.chatLocks = new Set([...this.chatLocks, accountId])
+    try {
+      if (options.signal?.aborted) return fail('cancelled')
+      if (options.isAccountCurrent?.() === false) return fail('account_changed')
+      const auth = await this.authenticate({ ...options, interactive: false })
+      if (!auth.success) return fail(auth.errorCode === 'busy' ? 'account_busy' : auth.errorCode ?? 'browser_error')
+      if (options.signal?.aborted) return fail('cancelled')
+      if (options.isAccountCurrent?.() === false) return fail('account_changed')
+      const entry = this.accounts.get(accountId)
+      if (!entry || entry.disposed || !entry.authenticated) return fail('account_changed')
+      if (!entry.chatWindow || entry.chatWindow.isDestroyed()) {
+        const window = new BrowserWindow({
+          width: 1060, height: 780, minWidth: 640, minHeight: 480, show: false, title: 'Z.ai · API', autoHideMenuBar: true,
+          webPreferences: { session: entry.session, nodeIntegration: false, contextIsolation: true,
+            sandbox: true, webSecurity: true, allowRunningInsecureContent: false, backgroundThrottling: false },
+        })
+        entry.chatWindow = window
+        // API chat pages never open another origin/window. Login belongs to the separate login window.
+        window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+        const guard = (event: { preventDefault(): void }, url: string): void => { if (!sameOrigin(url)) event.preventDefault() }
+        window.webContents.on('will-navigate', guard)
+        window.webContents.on('will-redirect', guard)
+        window.once('closed', () => { if (entry.chatWindow === window) entry.chatWindow = undefined })
+      }
+      const result = await task(entry.chatWindow)
+      if (options.signal?.aborted) return fail('cancelled')
+      if (options.isAccountCurrent?.() === false) return fail('account_changed')
+      return result
+    } finally {
+      this.chatLocks = new Set([...this.chatLocks].filter(id => id !== accountId))
+    }
+  }
+
   hasOpenBrowsers(): boolean {
     // App shutdown must also await a session still in setProxy, before BrowserWindow exists.
-    return [...this.accounts.values()].some(entry => !entry.disposed && (entry.initializing || !!entry.operation || (!!entry.window && !entry.window.isDestroyed())))
+    return this.chatLocks.size > 0 || [...this.accounts.values()].some(entry => !entry.disposed && (entry.initializing || !!entry.operation
+      || (!!entry.window && !entry.window.isDestroyed()) || (!!entry.chatWindow && !entry.chatWindow.isDestroyed())))
   }
 
   getAccountState(accountId: string): { windowOpen: boolean; authenticated: boolean; exactOrigin: boolean; stage?: string; nativeErrorCode?: string; verificationFailure?: string } {
@@ -186,6 +252,7 @@ export class ZaiAccountBrowserManager {
     entry.authenticated = false
     if (entry.operation) this.finish(entry, entry.operation, { success: false, errorCode: 'cancelled' })
     for (const child of entry.children) { if (!child.isDestroyed()) child.destroy() }
+    if (entry.chatWindow && !entry.chatWindow.isDestroyed()) entry.chatWindow.destroy()
     if (entry.window && !entry.window.isDestroyed()) entry.window.destroy()
     // A cancelled initialization can still be in setProxy; no subsequent window/seed is allowed.
     try { await entry.ready } catch { /* Cleanup still proceeds after initialization failure. */ }
@@ -201,13 +268,14 @@ export class ZaiAccountBrowserManager {
   }
 
   private focus(entry: AccountBrowser): void {
+    if (!entry.canFocus) return
     const window = entry.window
     if (window && !window.isDestroyed()) { if (window.isMinimized()) window.restore(); window.show(); window.focus() }
   }
 
-  private async createWindow(entry: AccountBrowser, mode: 'system' | 'none'): Promise<void> {
+  private async createWindow(entry: AccountBrowser, mode: 'system' | 'none', operation: Operation): Promise<void> {
     await applyProxyToSession(entry.session, mode)
-    if (entry.disposed) return
+    if (!this.current(entry, operation)) return
     const window = new BrowserWindow({
       width: 1060, height: 780, minWidth: 640, minHeight: 480, show: false, title: 'Z.ai', autoHideMenuBar: true,
       webPreferences: { session: entry.session, nodeIntegration: false, contextIsolation: true,
@@ -216,7 +284,11 @@ export class ZaiAccountBrowserManager {
     entry.window = window
     this.attachWindow(entry, window)
     window.once('ready-to-show', () => this.focus(entry))
-    window.once('closed', () => { if (!entry.disposed) void this.clearAccount(entry.accountId) })
+    window.once('closed', () => {
+      if (entry.disposed) return
+      if (entry.chatWindow && !entry.chatWindow.isDestroyed() && !entry.operation) entry.window = undefined
+      else void this.clearAccount(entry.accountId)
+    })
     entry.stage = 'loading'
     await this.loadOfficial(entry)
     this.focus(entry)
@@ -296,6 +368,10 @@ export class ZaiAccountBrowserManager {
         entry.stage = 'waiting_login'
         entry.verificationFailure = ['source_changed', 'login_required', 'network_error', 'origin_changed'].includes(String(data.state))
           ? data.state as AccountBrowser['verificationFailure'] : 'metadata_invalid'
+        if (!operation.interactive && data.state !== 'source_changed') {
+          this.finish(entry, operation, { success: false, errorCode: data.state === 'login_required' ? 'login_required'
+            : data.state === 'network_error' ? 'network_error' : 'identity_unverified' })
+        }
         return // Guest/expired sessions remain open for normal manual login.
       }
       const userId = accountUserId(data.userId)
@@ -316,11 +392,11 @@ export class ZaiAccountBrowserManager {
       const unchanged = await contents.executeJavaScript(`location.origin === ${JSON.stringify(ORIGIN)} && localStorage.getItem('token') === ${JSON.stringify(sourceToken)}`)
       if (!this.current(entry, operation)) return
       if (unchanged !== true) { entry.verificationFailure = 'source_changed'; return }
-      entry.importedFingerprint = fingerprint(sourceToken)
       this.finish(entry, operation, { success: true, credentials: { token: sourceToken }, accountInfo: { ...(userId ? { userId } : {}), ...(email ? { email } : {}) } })
     } catch (error) {
       entry.nativeErrorCode = nativeErrorCode(error)
       entry.verificationFailure = 'browser_error'
+      if (!operation.interactive) this.finish(entry, operation, { success: false, errorCode: 'browser_error' })
       // Navigation, offline and expired sessions can recover in the same window. Never expose remote error text.
     } finally { operation.checking = false }
   }
@@ -329,6 +405,7 @@ export class ZaiAccountBrowserManager {
     if (entry.operation !== operation) return
     if (operation.timer) clearTimeout(operation.timer)
     if (operation.poll) clearInterval(operation.poll)
+    operation.removeAbort?.()
     entry.operation = undefined
     entry.authenticated = result.success
     if (result.success) { entry.stage = 'ready'; entry.nativeErrorCode = undefined; entry.verificationFailure = undefined }

@@ -241,6 +241,8 @@ for (const adapter of ['standard-openai-tools', 'cherry-studio-mcp']) test(`cust
 for (const [code, status, expected] of [
   ['captcha_required', 403, 'captcha_required'], ['verification_required', 403, 'verification_required'],
   ['authentication_required', 401, 'authentication_required'], ['action_required', 409, 'action_required'],
+  ['account_busy', 409, 'account_busy'], ['account_busy', 429, 'account_busy'],
+  ['conversation_cursor_missing', 502, 'conversation_cursor_missing'],
   ['rate_limited', 429, 'rate_limited'], ['model_rate_limited', 429, 'rate_limited'],
   ['account_temporarily_suspended', 429, 'account_cooling_down'], ['account_cooling_down', 409, 'account_cooling_down'],
   ['account_banned', 429, 'account_banned'], ['account_daily_limit', 429, 'quota_exceeded'],
@@ -264,6 +266,22 @@ for (const [code, status, expected] of [
   assert.ok(result.retryAt! >= before + 60000 && result.retryAt! <= Date.now() + 60000)
   assert.equal(generated, 1)
   assert.doesNotMatch(JSON.stringify(result), /SECRET|fixture-gateway/)
+  if (['captcha_required', 'verification_required', 'action_required'].includes(code)) {
+    assert.match(result.message, /实际聊天\/验证窗口/)
+    assert.match(result.message, /可能尚无可见窗口或提示/)
+    assert.match(result.message, /网页已登录不代表聊天验证通过/)
+    assert.doesNotMatch(result.message, /登录窗口|重新登录/)
+  }
+  if (code === 'account_busy') {
+    assert.match(result.message, /当前请求未发送/)
+    assert.match(result.message, /不是额度限制/)
+    assert.doesNotMatch(result.message, /登录窗口|重新登录/)
+  }
+  if (code === 'conversation_cursor_missing') {
+    assert.match(result.message, /续聊编号/)
+    assert.match(result.message, /不是验证码问题/)
+    assert.doesNotMatch(result.message, /登录窗口|重新登录/)
+  }
 })
 
 test('unknown remote codes/messages and malformed retry headers cannot escape the diagnostic', async () => {

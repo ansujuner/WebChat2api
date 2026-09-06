@@ -1,5 +1,18 @@
 # Publication checks
 
+## v1.6.4 — website-backed Z.ai liveness and conversation continuity (2026-09-06)
+
+- Final local validation: **1,430 tests passed, 0 failed, 0 skipped** with native-browser discovery enabled; production build and flat renderer/shared type-check passed. Isolated production Electron completed **56/56 checks** and quit cleanly.
+- Reproduced the reported discrepancy: the saved account could restore the signed-in website, while the old independent chat transport returned HTTP **403 / captcha_required**. Login validation and chat-specific website preparation were different flows; no visible CAPTCHA was required to reproduce the failure.
+- Z.ai now submits through an account-owned official chat page, sharing only that account's verified browser session. The website performs its own normal preparation. The bridge verifies the actual submission's account identity, captures only that response, rejects mismatched inputs/options and holds a per-account lease until complete EOF. It does not fabricate browser metadata, copy verification proofs, replay a failed generation or disturb the separate login/manual-chat page.
+- Real testing exposed a second fault: complete replies without an SSE assistant ID were incorrectly rejected at conversation commit. After EOF, the bridge now verifies the exact submitted assistant/user/previous-parent relationships in that chat's saved graph before releasing the terminal frame. A contradictory SSE ID cannot override this verified cursor. Typed continuation errors are preserved in API responses, logs and tool-test guidance.
+- The production fixture exercises real renderer/preload/account IPC, the browser manager, encrypted fixture storage and two complete local OpenAI route calls. Only the website is replaced by protocol fixtures. It verifies ID-less replies, an intentionally conflicting terminal ID, same-chat continuation with a new assistant node, current-input-only submission, and independent login/API pages. No production profile or real website is used by this fixture.
+- **Sampled real-account result:** GLM-5.3-Flash on the existing Z.ai account passed actual account liveness with HTTP **200** and a complete reply. After deploying the cursor repair, the real settings tool-test service also passed **both HTTP 200 turns**: a declared tool call, then the harmless local result and a correct reply in the same conversation.
+- The app was restarted normally, with **no forced process termination**. The proxy reports configured and actual port **8081**, health HTTP **200**, and model-list HTTP **200**. Z.ai is ready; the existing DeepSeek account remains in cooldown and was not retried. Overall catalogue diagnostics therefore still report that another provider needs attention.
+- Separate Chinese GLM fixtures now cover content carried in the final frame and preservation of authentication/rate-limit status codes. These parser and error-mapping results are not a real Chinese GLM account test.
+
+**Boundary:** this is a sampled Z.ai GLM-5.3-Flash liveness and non-streaming OpenAI tool-flow result, not certification of every model, provider, account or streaming client. Future website verification may still require user interaction in the actual chat page. The new Z.ai bridge is text-only and does not implement upstream chat deletion; tests may leave website conversations. No real credentials, account IDs, raw chat responses, logs or local diagnostic artifacts are published.
+
 ## v1.6.3 — account-bound Z.ai website restoration (2026-09-06)
 
 - Final local validation: **1,327 tests passed, 0 failed, 0 skipped** with native-browser discovery enabled; production build and flat renderer/shared type-check passed. Isolated production Electron completed **52/52 checks**.

@@ -98,7 +98,7 @@ test('Z.ai new models preserve mandatory thinking while explicit custom IDs are 
   assert.match(source, /const mappedModel = resolveZaiWebModel\(request\.model\)/)
   assert.match(source, /model: mappedModel/)
   assert.match(source, /isZaiThinkingRequired\(mappedModel\)/)
-  assert.match(source, /const X_FE_VERSION = 'prod-fe-1\.1\.93'/)
+  assert.match(source, /runZaiWebsiteChat/)
   assert.equal(zaiConfig.headers['X-FE-Version'], 'prod-fe-1.1.93')
 })
 

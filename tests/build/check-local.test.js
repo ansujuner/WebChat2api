@@ -35,7 +35,7 @@ function Get-CimInstance { foreach ($item in (${ps(JSON.stringify(metadata))} | 
 $global:launchCount = 0
 function Write-FixtureReport {
     param($Mode, $Status = 'ok', $Timestamp = [DateTimeOffset]::UtcNow.ToString('o'))
-    $body = @{ status = $Status; checkedAt = $Timestamp; live = ($Mode -notin @('catalog', 'login')); stream = ($Mode -eq 'stream'); protocol = $(if ($Mode -eq 'stream') { 'anthropic' } else { 'openai' }); untrustedExtra = 'fixture-not-for-output' }
+    $body = @{ status = $Status; checkedAt = $Timestamp; live = ($Mode -notin @('catalog', 'login', 'arena-login', 'zai-login', 'accounts-status')); stream = ($Mode -eq 'stream'); protocol = $(if ($Mode -eq 'stream') { 'anthropic' } else { 'openai' }); untrustedExtra = 'fixture-not-for-output' }
     $body | ConvertTo-Json | Set-Content -LiteralPath (Join-Path ${ps(f.dir)} "artifacts\\proxy-$Mode-probe.json") -Encoding UTF8
 }
 function Start-Process {
@@ -220,4 +220,42 @@ windowsTest('tool smoke launcher requires explicit Live and rejects mixed diagno
   assert.equal(result.status, 0, result.stderr)
   assert.equal(JSON.parse(result.stdout).Mode, 'tools')
   assert.doesNotMatch(result.stdout, /fixture-not-for-output/)
+})
+
+windowsTest('Zai scoped liveness and read-only account status dispatch exact modes once in PowerShell 5 and 7', t => {
+  const f = fixture(t)
+  for (const executable of ['powershell.exe', ...(hasPwsh ? ['pwsh.exe'] : [])]) {
+    for (const [args, mode, status] of [['-Live -ZaiLiveness', 'zai-liveness', 'passed'], ['-AccountStatus', 'accounts-status', 'no_result']]) {
+      const result = run(f, { executable,
+        launch: `Write-FixtureReport -Mode ${mode} -Status ${status}`,
+        command: `$result = & ${ps(f.script)} ${args} -TimeoutSeconds 2; @{ result = $result; observed = $observed; launches = $launchCount } | ConvertTo-Json -Compress -Depth 4`,
+      })
+      assert.equal(result.status, 0, `${executable}: ${result.stderr}`)
+      const value = JSON.parse(result.stdout)
+      assert.equal(value.result.Mode, mode); assert.equal(value.result.Status, status)
+      assert.equal(value.result.Report, path.join(f.dir, `artifacts/proxy-${mode}-probe.json`))
+      assert.equal(value.observed.arguments, `"${f.dir}" --chat2api-probe=${mode}`)
+      assert.equal(value.observed.window, 'Hidden'); assert.equal(value.launches, 1)
+      assert.doesNotMatch(result.stdout, /fixture-not-for-output/)
+    }
+  }
+})
+
+windowsTest('Zai live opt-in is mandatory and both account modes reject all conflicting flags before process dispatch', t => {
+  const f = fixture(t)
+  const modes = ['Stream', 'DeepSeekAllModes', 'DeepSeekLogin', 'ZaiLogin', 'Tools', 'ArenaLogin', 'Arena', 'Accounts']
+  const cases = [{ ZaiLiveness: true }, ...modes.map(mode => ({ ZaiLiveness: true, Live: true, [mode]: true })),
+    ...[...modes, 'ZaiLiveness', 'Live'].map(mode => ({ AccountStatus: true, [mode]: true }))]
+  for (const executable of ['powershell.exe', ...(hasPwsh ? ['pwsh.exe'] : [])]) {
+    const result = run(f, { executable,
+      command: `$outcomes = @(foreach ($case in (${ps(JSON.stringify(cases))} | ConvertFrom-Json)) {
+        $flags = @{}; foreach ($property in $case.PSObject.Properties) { $flags[$property.Name] = [bool]$property.Value }
+        try { & ${ps(f.script)} @flags; @{ rejected = $false } } catch { @{ rejected = $true; error = $_.Exception.Message } }
+      }); @{ outcomes = $outcomes; launches = $launchCount } | ConvertTo-Json -Compress -Depth 4`,
+    })
+    assert.equal(result.status, 0, result.stderr)
+    const value = JSON.parse(result.stdout)
+    assert.equal(value.launches, 0); assert.equal(value.outcomes.length, cases.length)
+    for (const outcome of value.outcomes) { assert.equal(outcome.rejected, true); assert.match(outcome.error, /requires -Live|cannot be combined/) }
+  }
 })

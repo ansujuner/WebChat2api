@@ -98,6 +98,12 @@ Claude Code 的端点与环境变量配置见对应的 Claude Code 接入说明�
 
 报告位于 `artifacts/proxy-zai-login-probe.json`，只包含认证结果、保存版本变化、账号是否保留和安全阶段码，不含邮箱、账号 ID、Token、Cookie 或响应正文。`live: false` 表示没有聊天生成，不表示离线；`awaiting_login` 也不是成功。登录窗口保持打开，旧登录失效时需正常登录；不能将认证通过视为聊天验证码解除。
 
+## 只检查 Z.ai 测活及读取最近结果（v1.6.4 起）
+
+- `scripts/check-local.ps1 -Live -ZaiLiveness` 通过账号列表同一测活服务，仅检查 Z.ai，不兜底其他供应商。每个可测账号只发送一条短消息，禁用、冷却等批量规则仍保留。
+- `scripts/check-local.ps1 -AccountStatus` 只读取本次应用会话最近的测活摘要，不发送消息、不启动浏览器；没有结果时返回 `no_result`。
+- 报告分别保存为 `artifacts/proxy-zai-liveness-probe.json`、`artifacts/proxy-accounts-status-probe.json`。不包含账号名称、ID、凭据或回复正文。超时或受阻不会自动重发。
+
 ## 更新、退出与日志
 
 - 新代码构建后，需要先从 Chat2API 系统托盘菜单选择 **退出**，再启动。关闭窗口默认可能只是隐藏到托盘。

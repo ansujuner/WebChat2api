@@ -5,6 +5,8 @@ Ask the already-running project app to check its real proxy address and model li
 .DESCRIPTION
 Catalog checks do not generate chats. -Live explicitly requests one small real
 conversation per supported provider; -Live -Stream requests Anthropic streaming.
+-Live -ZaiLiveness checks only Z.ai accounts. -AccountStatus only reads the last
+in-memory account check and never starts a new one.
 This wrapper never reads account/profile files or keys, disables authentication,
 guesses a port, starts a separate profile, or retries a generation.
 #>
@@ -19,12 +21,16 @@ param(
     [switch]$ArenaLogin,
     [switch]$Arena,
     [switch]$Accounts,
+    [switch]$ZaiLiveness,
+    [switch]$AccountStatus,
     [ValidateRange(0, 900)][int]$TimeoutSeconds = 0
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'This diagnostic launcher is for Windows.' }
+if ($AccountStatus -and ($Live -or $Stream -or $DeepSeekAllModes -or $DeepSeekLogin -or $ZaiLogin -or $Tools -or $ArenaLogin -or $Arena -or $Accounts -or $ZaiLiveness)) { throw '-AccountStatus is read-only and cannot be combined with another mode.' }
+if ($ZaiLiveness -and (-not $Live -or $Stream -or $DeepSeekAllModes -or $DeepSeekLogin -or $ZaiLogin -or $Tools -or $ArenaLogin -or $Arena -or $Accounts)) { throw '-ZaiLiveness requires -Live and cannot be combined with another diagnostic mode.' }
 if ($ZaiLogin -and ($Live -or $Stream -or $DeepSeekAllModes -or $DeepSeekLogin -or $Tools -or $ArenaLogin -or $Arena -or $Accounts)) { throw '-ZaiLogin is an existing-account restore and cannot be combined with another mode.' }
 if ($Accounts -and (-not $Live -or $Stream -or $DeepSeekAllModes -or $DeepSeekLogin -or $Tools -or $ArenaLogin -or $Arena)) { throw '-Accounts requires -Live and cannot be combined with another diagnostic mode.' }
 if ($ArenaLogin -and ($Live -or $Stream -or $DeepSeekAllModes -or $DeepSeekLogin -or $Tools -or $Arena)) { throw '-ArenaLogin cannot be combined with generation checks or another login mode.' }
@@ -36,10 +42,10 @@ if ($Tools -and (-not $Live -or $Stream -or $DeepSeekAllModes -or $DeepSeekLogin
 
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $electronPath = Join-Path $projectRoot 'node_modules\electron\dist\electron.exe'
-$mode = if ($ZaiLogin) { 'zai-login' } elseif ($Accounts) { 'accounts' } elseif ($ArenaLogin) { 'arena-login' } elseif ($Arena) { 'arena' } elseif ($Tools) { 'tools' } elseif ($DeepSeekLogin) { 'login' } elseif ($DeepSeekAllModes) { 'deepseek' } elseif ($Stream) { 'stream' } elseif ($Live) { 'live' } else { 'catalog' }
+$mode = if ($AccountStatus) { 'accounts-status' } elseif ($ZaiLiveness) { 'zai-liveness' } elseif ($ZaiLogin) { 'zai-login' } elseif ($Accounts) { 'accounts' } elseif ($ArenaLogin) { 'arena-login' } elseif ($Arena) { 'arena' } elseif ($Tools) { 'tools' } elseif ($DeepSeekLogin) { 'login' } elseif ($DeepSeekAllModes) { 'deepseek' } elseif ($Stream) { 'stream' } elseif ($Live) { 'live' } else { 'catalog' }
 $reportPath = Join-Path $projectRoot "artifacts\proxy-$mode-probe.json"
 if (-not (Test-Path -LiteralPath $electronPath -PathType Leaf)) { throw 'The project-local Electron runtime is missing. Start the updated project app first.' }
-if ($TimeoutSeconds -eq 0) { $TimeoutSeconds = if ($Accounts) { 900 } elseif ($DeepSeekLogin -or $ArenaLogin -or $ZaiLogin) { 660 } elseif ($DeepSeekAllModes -or $Arena) { 660 } elseif ($Live) { 420 } else { 30 } }
+if ($TimeoutSeconds -eq 0) { $TimeoutSeconds = if ($Accounts -or $ZaiLiveness) { 900 } elseif ($DeepSeekLogin -or $ArenaLogin -or $ZaiLogin) { 660 } elseif ($DeepSeekAllModes -or $Arena) { 660 } elseif ($Live) { 420 } else { 30 } }
 
 # Metadata only: inspect only this checkout's executable, never any saved profile.
 $existingApp = @(Get-CimInstance Win32_Process -Filter "Name = 'electron.exe'" | Where-Object {

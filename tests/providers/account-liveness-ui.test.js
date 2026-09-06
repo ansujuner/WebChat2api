@@ -201,3 +201,22 @@ test('UI entry points keep credential validation separate and single tests are n
   const sources = read('src/renderer/src/hooks/useAccountLiveness.ts') + read('src/renderer/src/components/providers/AccountLivenessPanel.tsx')
   assert.doesNotMatch(sources, /setEnabled\(|clearSuspension\(|accounts\.update\(|\.credentials|\.reply|\.responseBody|\.message\b|setInterval\(|setTimeout\(/)
 })
+
+test('chat verification guidance points to the actual chat context, acknowledges invisible prompts and never promises liveness from sign-in', () => {
+  for (const language of ['zh-CN', 'en-US']) {
+    const locale = JSON.parse(read(`src/renderer/src/i18n/locales/${language}.json`))
+    const messages = [locale.accountLiveness.reasons.action_required,
+      ...['captcha_required', 'verification_required', 'action_required'].map(code => locale.toolCalling.smoke.reasons[code])]
+    for (const message of messages) {
+      assert.match(message, language === 'zh-CN' ? /实际聊天\/验证窗口/ : /actual chat\/verification window/)
+      assert.match(message, language === 'zh-CN' ? /可能尚无可见窗口或提示/ : /may be no visible window or prompt/)
+      assert.match(message, language === 'zh-CN' ? /已登录不代表/ : /signed in does not mean/)
+      assert.doesNotMatch(message, /登录窗口|重新登录|login window|sign in again/i)
+    }
+    assert.match(locale.accountLiveness.reasons.auth_required, language === 'zh-CN' ? /重新登录/ : /sign in again/i)
+    const html = panel(job({ state: 'completed', results: [result({ status: 'failed', reason: 'account_busy' })] }), language)
+    assert.ok(html.includes(locale.accountLiveness.reasons.account_busy))
+    assert.match(html, language === 'zh-CN' ? /当前请求未发送/ : /current request was not sent/)
+    assert.doesNotMatch(locale.accountLiveness.reasons.account_busy, /登录|sign in|login/i)
+  }
+})

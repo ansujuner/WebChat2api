@@ -71,7 +71,9 @@ function fixture(zaiResponse) {
       async chatCompletion(options) {
         captured.push({ id, options })
         if (failNext) throw new Error('uncertain upstream submission')
-        options.onConversation?.({ sessionId: 'upstream-thread', parentMessageId: `message-${captured.length}` })
+        // Z.ai's website bridge proves this cursor with its read-only persisted chat graph.
+        // Its parser is deliberately not an alternative source of continuation IDs.
+        options.onConversation?.({ sessionId: 'upstream-thread', parentMessageId: `${id === 'zai' ? 'verified-graph-' : ''}message-${captured.length}` })
         const response = id === 'zai' && zaiResponse ? zaiResponse : { status: 200, headers: {}, data: id === 'minimax' && !options.stream ? makeAnswer() : Readable.from([]) }
         if (id === 'perplexity') return { stream: response.data, sessionId: 'upstream-thread' }
         if (id === 'minimax' && options.stream) return { response: null, stream: { stream: Readable.from([asChunks()]) }, chatId: 'upstream-thread' }
@@ -85,22 +87,31 @@ function fixture(zaiResponse) {
     Adapter[`is${label}Provider`] = provider => provider.id === id
     class Handler {
       constructor(...args) { constructions.push({ id, args }); this.listener = undefined }
-      setConversationListener(listener) { assert.equal(typeof listener, 'function'); this.listener = listener; listeners.push({ id, listener }) }
+      setConversationListener(listener) {
+        assert.notEqual(id, 'zai', 'the website graph, not the Z.ai SSE parser, owns the cursor')
+        assert.equal(typeof listener, 'function'); this.listener = listener; listeners.push({ id, listener })
+      }
       setAccountRestrictionListener() {}
       setChatId() {}
       getConversationId() { return 'upstream-thread' }
       getSessionId() { return 'upstream-thread' }
       getAssistantContentForTitle() { return 'fixture answer' }
       async handleStream() {
-        assert.equal(typeof this.listener, 'function', 'listener must be connected before stream parsing')
-        this.listener({ sessionId: 'upstream-thread', parentMessageId: `message-${captured.length}` })
+        if (id === 'zai') assert.equal(this.listener, undefined)
+        else {
+          assert.equal(typeof this.listener, 'function', 'listener must be connected before stream parsing')
+          this.listener({ sessionId: 'upstream-thread', parentMessageId: `message-${captured.length}` })
+        }
         const output = new PassThrough()
         setImmediate(() => output.end(asChunks()))
         return output
       }
       async handleNonStream() {
-        assert.equal(typeof this.listener, 'function', 'listener must be connected before non-stream parsing')
-        this.listener({ sessionId: 'upstream-thread', parentMessageId: `message-${captured.length}` })
+        if (id === 'zai') assert.equal(this.listener, undefined)
+        else {
+          assert.equal(typeof this.listener, 'function', 'listener must be connected before non-stream parsing')
+          this.listener({ sessionId: 'upstream-thread', parentMessageId: `message-${captured.length}` })
+        }
         return id === 'mimo' ? JSON.stringify(makeAnswer()) : makeAnswer()
       }
     }
@@ -110,6 +121,7 @@ function fixture(zaiResponse) {
       return Readable.from([asChunks()])
     }
     imports[`./adapters/${id}`] = { [`${label}Adapter`]: Adapter, [`${label}StreamHandler`]: Handler }
+    if (id === 'zai') imports[`./adapters/${id}`].ZaiUpstreamError = class extends Error {}
     if (id === 'deepseek' || id === 'perplexity' || id === 'arena') imports[`./adapters/${id}-stream`] = { [`${label}StreamHandler`]: Handler }
   }
   const { RequestForwarder } = evaluate('forwarder.ts', imports)
@@ -155,14 +167,15 @@ for (const [id] of providers) {
           assert.equal(sent.messages[0].content, 'INJECTED_TOOL_SCHEMA')
         } else {
           assert.equal(sent.conversation.sessionId, 'upstream-thread')
-          assert.equal(sent.conversation.parentMessageId, `message-${round}`)
+          assert.equal(sent.conversation.parentMessageId, `${id === 'zai' ? 'verified-graph-' : ''}message-${round}`)
           assert.deepEqual(plain(sent.messages), [{ role: 'user', content: input[round] }])
           assert.equal(sent.tools, undefined)
         }
         turn.commit({ role: 'assistant', content: 'fixture answer' })
       }
       assert.equal(f.captured.length, 3)
-      assert.equal(f.listeners.length, id === 'minimax' ? 0 : 3, 'MiniMax reports polling state directly from its adapter')
+      assert.equal(f.listeners.length, ['minimax', 'zai'].includes(id) ? 0 : 3,
+        'MiniMax polling and Z.ai verified graph state are reported directly from their adapters')
       assert.ok(f.constructions.every(item => item.args.every(arg => typeof arg !== 'function')), 'retained handlers must not receive deletion callbacks')
       assert.equal(f.deletes.length, 0)
       assert.equal(f.contextCalls(), 0)

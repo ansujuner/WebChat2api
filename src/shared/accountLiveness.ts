@@ -3,7 +3,7 @@ export type AccountLivenessReason =
   | 'disabled' | 'provider_disabled' | 'cooldown' | 'daily_limit'
   | 'account_missing' | 'provider_missing' | 'no_text_model'
   | 'auth_required' | 'action_required' | 'rate_limited' | 'quota_unavailable'
-  | 'browser_unavailable' | 'model_unavailable'
+  | 'browser_unavailable' | 'model_unavailable' | 'account_busy'
   | 'account_banned' | 'incomplete_response' | 'request_failed'
   | 'timeout' | 'cancelled' | 'account_changed' | 'internal_error'
 

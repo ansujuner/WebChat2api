@@ -274,22 +274,22 @@ test('Z.ai default models match current web IDs and frontend version', () => {
   assert.deepEqual(zaiConfig.modelMappings, expected)
   const adapter = readFileSync(join(root, 'src/main/proxy/adapters/zai.ts'), 'utf8')
   assert.match(adapter, /resolveZaiWebModel/)
-  assert.match(adapter, /prod-fe-1\.1\.93/)
-  assert.match(adapter, /captcha_verify_param/)
+  assert.match(adapter, /runZaiWebsiteChat/)
+  assert.doesNotMatch(adapter, /FAKE_HEADERS|generateSignature|axios\.post/)
 })
 
-test('Chinese and English READMEs retain the Z.ai captcha boundary without claiming live availability', () => {
+test('Chinese and English READMEs document the website transport without equating login with liveness', () => {
   const readmeCn = readFileSync(join(root, 'README.md'), 'utf8')
   const readmeEn = readFileSync(join(root, 'README_EN.md'), 'utf8')
   const doc = readFileSync(join(root, 'docs/providers/zai.md'), 'utf8')
 
-  assert.match(readmeCn, /Z\.ai[^\n]*前端验证码风控[^\n]*暂不可用/)
-  assert.match(readmeEn, /Z\.ai[^\n]*temporarily unavailable due to frontend captcha risk control/)
+  assert.match(readmeCn, /Z\.ai[^\n]*账号独立网页[^\n]*网页登录成功不等于测活通过/)
+  assert.match(readmeEn, /Z\.ai[^\n]*account-owned website session[^\n]*sign-in alone is not a successful liveness check/)
   for (const readme of [readmeCn, readmeEn]) {
     assert.match(readme, /FRONTEND_CAPTCHA_REQUIRED/)
     assert.ok(readme.includes('docs/providers/zai.md'))
   }
-  assert.match(doc, /当前状态 \| 受前端验证码风控限制，暂不可用/)
+  assert.match(doc, /当前状态 \| v1\.6\.4 账号网页通道/)
   assert.match(doc, /FRONTEND_CAPTCHA_REQUIRED/)
   assert.match(doc, /captcha_verify_param.*调试字段/)
 })

@@ -19,6 +19,10 @@ function load(provider, client) {
   const baseChunk = (id, model, created) => ({ id, model, created, object: 'chat.completion.chunk' })
   const mocks = {
     axios: { default: { ...client, create: () => client } },
+    '../../oauth/zaiWebsiteChat': {
+      runZaiWebsiteChat: options => client.websiteChat(options),
+      ZaiWebsiteChatError: class extends Error {},
+    },
     crypto: { default: require('node:crypto') },
     '../toolCalling/providerProfiles': { getProviderToolProfile: () => ({
       formatToolResult: ({ toolCallId, content }) => `<tool_result id="${toolCallId}">${content}</tool_result>`,
@@ -61,30 +65,30 @@ for (const state of ['already-ended', 'already-destroyed', 'stalled']) {
     if (state === 'already-destroyed') source.destroy()
     const response = Object.freeze({ status: 403, headers: {}, data: source })
     const { ZaiAdapter } = load('zai', {
-      post: async url => url.endsWith('/chats/new') ? { status: 200, data: { id: 'fixture-chat' } } : response,
+      websiteChat: async () => ({ response, chatId: 'fixture-chat', requestId: 'fixture-request' }),
     })
-    const adapter = new ZaiAdapter({ id: 'zai', modelMappings: {} }, { credentials: { token: 'fixture-token' } })
+    const adapter = new ZaiAdapter({ id: 'zai', modelMappings: {} }, { id: 'fixture-account', providerId: 'zai', credentials: { token: 'fixture-token' } })
     const result = await adapter.chatCompletion({ model: 'fixture-model', messages: messages('hello'), stream: false, retainConversation: true })
     assert.equal(result.response.status, 403)
-    assert.equal(result.response.data, undefined)
+    assert.equal(result.response.data, source)
     assert.equal(source.destroyed, true)
     assert.equal(response.data, source, 'the adapter must not mutate the original response')
     assert.equal(source.listenerCount('data'), 0, 'error bodies are not drained for logging')
   })
 }
 
-test('zai: client non-stream mode still requests the native upstream SSE protocol', async () => {
-  let payload
-  const { ZaiAdapter } = load('zai', {
-    post: async (url, body) => {
-      if (url.endsWith('/chats/new')) return { status: 200, data: { id: 'fixture-chat' } }
-      payload = body
-      return { status: 403, headers: {}, data: new PassThrough() }
-    },
-  })
-  const adapter = new ZaiAdapter({ id: 'zai', modelMappings: {} }, { credentials: { token: 'fixture-token' } })
-  await adapter.chatCompletion({ model: 'fixture-model', messages: messages('hello'), stream: false, retainConversation: true })
-  assert.equal(payload.stream, true)
+test('zai: client non-stream mode uses the website SSE response rather than a standalone JSON request', async () => {
+  const source = new PassThrough()
+  let submitted
+  const { ZaiAdapter } = load('zai', { websiteChat: async options => {
+    submitted = options
+    return { response: { status: 200, headers: {}, data: source }, chatId: 'fixture-chat', requestId: 'fixture-request' }
+  }, post: () => assert.fail('independent HTTP must never run') })
+  const adapter = new ZaiAdapter({ id: 'zai', modelMappings: {} }, { id: 'fixture-account', providerId: 'zai', credentials: { token: 'fixture-token' } })
+  const result = await adapter.chatCompletion({ model: 'fixture-model', messages: messages('hello'), stream: false, retainConversation: true })
+  assert.equal(submitted.prompt, 'hello')
+  assert.equal(result.response.data, source)
+  source.destroy()
 })
 
 for (const [code, category] of [
@@ -167,13 +171,13 @@ const cases = [
   },
   {
     provider: 'zai', adapter: 'ZaiAdapter', handler: 'ZaiStreamHandler',
-    id: payload => payload.chat_id,
-    parent: payload => payload.current_user_message_parent_id,
-    content: payload => payload.messages[0].content,
+    id: payload => payload.conversation?.sessionId ?? 'server-chat-id',
+    parent: payload => payload.conversation?.parentMessageId ?? null,
+    content: payload => payload.prompt,
     cursor: (payload, round) => `server-assistant-message-${round}`,
     events: (payload, cursor) => [
       // A user echo must never become the assistant cursor.
-      { type: 'chat:completion', data: { role: 'user', id: payload.current_user_message_id } },
+      { type: 'chat:completion', data: { role: 'user', id: 'website-user-echo' } },
       { type: 'chat:completion', data: { role: 'assistant', id: cursor, phase: 'answer', delta_content: '你好！' } },
       { type: 'chat:completion', data: { phase: 'done', done: true } },
     ],
@@ -198,6 +202,10 @@ for (const spec of cases) {
       const created = []
       const deleted = []
       const client = {
+        websiteChat: async options => {
+          sent.push(plain(options))
+          return { response: { status: 200, data: new PassThrough(), headers: {} }, chatId: options.conversation?.sessionId ?? 'server-chat-id', requestId: `website-request-${sent.length}` }
+        },
         post: async (url, payload) => {
           if (url.endsWith('/chats/new')) {
             created.push(plain(payload))
@@ -212,6 +220,7 @@ for (const spec of cases) {
       }
       const classes = load(spec.provider, client)
       const adapter = new classes[spec.adapter]({ id: spec.provider, modelMappings: {} }, {
+        id: 'fixture-account', providerId: spec.provider,
         credentials: Object.freeze({ token: 'fixture-token', cookies: 'fixture=1', ticket: 'fixture-ticket' }),
       })
       let state
@@ -249,7 +258,7 @@ for (const spec of cases) {
           assert.equal(completed.choices[0].message.content, '你好！')
         }
         assert.equal(spec.content(payload), input)
-        assert.equal(payload.messages.length, 1)
+        if (spec.provider !== 'zai') assert.equal(payload.messages.length, 1)
         assert.equal(state.sessionId, spec.id(payload))
         assert.equal(state.parentMessageId, cursor)
         if (index === 0) {
@@ -268,28 +277,27 @@ for (const spec of cases) {
             assert.notEqual(payload.messages[0].fid, sent[0].messages[0].fid)
             assert.notEqual(previousCursor, sent[0].messages[0].fid)
             assert.notEqual(previousCursor, sent[0].messages[0].childrenIds[0])
-          } else {
-            assert.notEqual(payload.current_user_message_id, sent[0].current_user_message_id)
           }
         }
         previousCursor = cursor
       }
       assert.equal(sent.length, 2)
-      assert.equal(created.length, spec.provider === 'qwen' ? 0 : 1)
+      assert.equal(created.length, spec.provider === 'qwen-ai' ? 1 : 0)
       assert.deepEqual(deleted, [])
     })
   }
 
   test(`${spec.provider}: missing upstream cursor fails before creating/sending a replacement chat`, async () => {
     let requests = 0
-    const classes = load(spec.provider, { post: async () => { requests++; throw new Error('network must not run') } })
+    const classes = load(spec.provider, { websiteChat: async () => { requests++; throw new Error('website must not run') }, post: async () => { requests++; throw new Error('network must not run') } })
     const adapter = new classes[spec.adapter]({ id: spec.provider, modelMappings: {} }, {
+      id: 'fixture-account', providerId: spec.provider,
       credentials: { token: 'fixture-token', ticket: 'fixture-ticket', cookies: 'fixture=1' },
     })
     await assert.rejects(adapter.chatCompletion({
       model: 'fixture-model', messages: messages('第二轮'),
       conversation: { sessionId: 'server-chat-id' }, retainConversation: true,
-    }), /missing the previous/)
+    }), spec.provider === 'zai' ? error => error.category === 'invalid_request' : /missing the previous/)
     assert.equal(requests, 0)
   })
 }
@@ -297,12 +305,16 @@ for (const spec of cases) {
 for (const spec of cases.filter(item => item.provider !== 'qwen')) {
   test(`${spec.provider}: tool-only continuation sends the new result on the same assistant parent`, async () => {
     const sent = []
-    const classes = load(spec.provider, { post: async (url, payload) => {
+    const classes = load(spec.provider, { websiteChat: async options => {
+      sent.push(plain(options))
+      return { response: { status: 200, headers: {}, data: new PassThrough() }, chatId: options.conversation.sessionId, requestId: 'website-request' }
+    }, post: async (url, payload) => {
       assert.doesNotMatch(url, /chats\/new/)
       sent.push(plain(payload))
       return { status: 200, data: {}, headers: {} }
     } })
     const adapter = new classes[spec.adapter]({ id: spec.provider, modelMappings: {} }, {
+      id: 'fixture-account', providerId: spec.provider,
       credentials: { token: 'fixture-token', cookies: 'fixture=1' },
     })
     const turnMessages = Object.freeze([Object.freeze({
@@ -316,8 +328,10 @@ for (const spec of cases.filter(item => item.provider !== 'qwen')) {
     const payload = sent[0]
     assert.equal(spec.id(payload), 'existing-chat')
     assert.equal(spec.parent(payload), 'server-assistant-tool-call')
-    assert.equal(payload.messages.length, 1)
-    assert.equal(payload.messages[0].role, 'user')
+    if (spec.provider !== 'zai') {
+      assert.equal(payload.messages.length, 1)
+      assert.equal(payload.messages[0].role, 'user')
+    }
     assert.equal(spec.content(payload), '<tool_result id="weather-call">上海：晴，25°C</tool_result>')
     assert.deepEqual(plain(turnMessages), [{ role: 'tool', tool_call_id: 'weather-call', content: '上海：晴，25°C' }])
   })

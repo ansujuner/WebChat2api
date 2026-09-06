@@ -224,7 +224,7 @@ module.exports = async function verifyCustomTools({ invoke, check, port }) {
     check('tool-test-real-ui-button-completes-two-turn-fixture-and-displays-pass')
     chatBlocked = true
     await clickText(['运行测试', 'Run test'])
-    await until(`Array.from(document.querySelectorAll('button')).some(node=>['检查账号与登录','Check accounts and login'].includes(node.textContent.trim()))`, 'account-blocked tool test in UI')
+    await until(`Array.from(document.querySelectorAll('button')).some(node=>['检查账号与官网提示','Check account and provider guidance'].includes(node.textContent.trim()))`, 'account-blocked tool test in UI')
     assert.equal(blockedRequests, 1, 'Blocked UI tool test must not retry or submit a second turn')
     assert.ok(await invoke(`!document.querySelector('main').textContent.includes(${JSON.stringify(token)})`), 'UI must not expose upstream prose that echoes a credential')
     const blocked = await call('toolCalling', 'getStatus')
