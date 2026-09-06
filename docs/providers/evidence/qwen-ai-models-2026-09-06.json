@@ -1,0 +1,63 @@
+{
+  "checkedAt": "2026-09-06",
+  "url": "https://chat.qwen.ai/api/models",
+  "status": 200,
+  "pageTitle": "Qwen Studio",
+  "pageText": "Qwen3.7-Plus\n登录\n注册\n有什么可以帮你的吗？\n自动\n使用 Qwen Studio，即表示你同意我们的 用户条款 和 隐私协议。",
+  "models": [
+    {
+      "id": "qwen3.7-plus",
+      "name": "Qwen3.7-Plus",
+      "active": true,
+      "visitorActive": true,
+      "chatTypes": [
+        "t2t",
+        "t2v",
+        "t2i",
+        "image_edit",
+        "search",
+        "artifacts",
+        "web_dev",
+        "deep_research",
+        "travel",
+        "learn",
+        "slides"
+      ],
+      "capabilities": {
+        "vision": true,
+        "document": true,
+        "video": true,
+        "audio": true,
+        "thinking": true,
+        "search": true
+      }
+    },
+    {
+      "id": "qwen3.8-max",
+      "name": "Qwen3.8-Max",
+      "active": true,
+      "visitorActive": true,
+      "chatTypes": [
+        "t2t",
+        "t2v",
+        "t2i",
+        "image_edit",
+        "search",
+        "artifacts",
+        "web_dev",
+        "deep_research",
+        "travel",
+        "learn",
+        "slides"
+      ],
+      "capabilities": {
+        "vision": true,
+        "document": true,
+        "video": true,
+        "audio": true,
+        "thinking": true,
+        "search": true
+      }
+    }
+  ]
+}

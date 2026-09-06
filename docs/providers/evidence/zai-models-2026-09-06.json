@@ -1,0 +1,313 @@
+{
+  "checkedAt": "2026-09-06",
+  "url": "https://chat.z.ai/api/models",
+  "status": 200,
+  "models": [
+    {
+      "id": "x-preview-l",
+      "name": "GLM-5.3-Flash",
+      "active": true,
+      "capabilities": {
+        "agent_mode": true,
+        "citations": false,
+        "file_qa": true,
+        "free_think": false,
+        "language_detection": false,
+        "mcp": false,
+        "preview_mode": false,
+        "reasoning_effort": true,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": true,
+        "skip_think": false,
+        "think": true,
+        "vision": true,
+        "vlm_tools_enable": false,
+        "vlm_web_search_enable": false,
+        "vlm_website_mode": false,
+        "web_search": true
+      }
+    },
+    {
+      "id": "glm-5.3",
+      "name": "GLM-5.3",
+      "active": true,
+      "capabilities": {
+        "agent_mode": true,
+        "citations": false,
+        "file_qa": true,
+        "free_think": false,
+        "language_detection": false,
+        "mcp": true,
+        "preview_mode": false,
+        "reasoning_effort": true,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": true,
+        "skip_think": false,
+        "think": true,
+        "vision": false,
+        "vlm_tools_enable": false,
+        "vlm_web_search_enable": false,
+        "vlm_website_mode": false,
+        "web_search": true
+      }
+    },
+    {
+      "id": "glm-5.2",
+      "name": "GLM-5.2",
+      "active": true,
+      "capabilities": {
+        "agent_mode": true,
+        "citations": false,
+        "file_qa": true,
+        "free_think": true,
+        "language_detection": false,
+        "mcp": true,
+        "preview_mode": false,
+        "reasoning_effort": true,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": true,
+        "skip_think": true,
+        "think": true,
+        "vision": false,
+        "vlm_tools_enable": false,
+        "vlm_web_search_enable": false,
+        "vlm_website_mode": false,
+        "web_search": true
+      }
+    },
+    {
+      "id": "GLM-5-Turbo",
+      "name": "GLM-5-Turbo",
+      "active": true,
+      "capabilities": {
+        "agent_mode": true,
+        "citations": false,
+        "file_qa": true,
+        "free_think": true,
+        "language_detection": false,
+        "mcp": true,
+        "preview_mode": false,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": true,
+        "skip_think": true,
+        "think": true,
+        "vision": false,
+        "vlm_tools_enable": false,
+        "vlm_web_search_enable": false,
+        "vlm_website_mode": false,
+        "web_search": true
+      }
+    },
+    {
+      "id": "GLM-5v-Turbo",
+      "name": "GLM-5V-Turbo",
+      "active": true,
+      "capabilities": {
+        "agent_mode": true,
+        "citations": true,
+        "file_qa": true,
+        "free_think": true,
+        "language_detection": false,
+        "mcp": false,
+        "preview_mode": false,
+        "reasoning_effort": false,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": true,
+        "skip_think": false,
+        "think": true,
+        "vision": true,
+        "vlm_tools_enable": true,
+        "vlm_web_search_enable": true,
+        "vlm_website_mode": true,
+        "web_search": true
+      }
+    },
+    {
+      "id": "glm-4.7",
+      "name": "GLM-4.7",
+      "active": true,
+      "capabilities": {
+        "agent_mode": false,
+        "citations": false,
+        "file_qa": true,
+        "free_think": true,
+        "language_detection": false,
+        "mcp": true,
+        "preview_mode": false,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": true,
+        "skip_think": true,
+        "think": true,
+        "vision": false,
+        "vlm_tools_enable": false,
+        "vlm_web_search_enable": false,
+        "vlm_website_mode": false,
+        "web_search": true
+      }
+    },
+    {
+      "id": "glm-4.6v",
+      "name": "GLM-4.6V",
+      "active": true,
+      "capabilities": {
+        "citations": false,
+        "file_qa": false,
+        "free_think": false,
+        "language_detection": false,
+        "mcp": true,
+        "preview_mode": false,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": false,
+        "skip_think": false,
+        "think": true,
+        "vision": true,
+        "web_search": false
+      }
+    },
+    {
+      "id": "0727-106B-API",
+      "name": "GLM-4.5-Air",
+      "active": true,
+      "capabilities": {
+        "citations": false,
+        "file_qa": true,
+        "language_detection": false,
+        "mcp": true,
+        "preview_mode": false,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": true,
+        "think": true,
+        "vision": false,
+        "web_search": false
+      }
+    },
+    {
+      "id": "0727-360B-API",
+      "name": "GLM-4.5",
+      "active": true,
+      "capabilities": {
+        "citations": false,
+        "file_qa": true,
+        "free_think": false,
+        "language_detection": false,
+        "mcp": true,
+        "preview_mode": false,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": true,
+        "skip_think": false,
+        "think": true,
+        "vision": false,
+        "web_search": false
+      }
+    },
+    {
+      "id": "GLM-4.1V-Thinking-FlashX",
+      "name": "GLM-4.1V-9B-Thinking",
+      "active": true,
+      "capabilities": {
+        "citations": false,
+        "file_qa": false,
+        "language_detection": false,
+        "mcp": false,
+        "preview_mode": false,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": true,
+        "vision": true,
+        "web_search": false
+      }
+    },
+    {
+      "id": "deep-research",
+      "name": "Z1-Rumination",
+      "active": true,
+      "capabilities": {
+        "citations": true,
+        "file_qa": false,
+        "language_detection": true,
+        "mcp": false,
+        "preview_mode": false,
+        "restore_n_source": false,
+        "returnFc": false,
+        "returnThink": false,
+        "vision": false,
+        "web_search": false
+      }
+    },
+    {
+      "id": "zero",
+      "name": "Z1-32B",
+      "active": true,
+      "capabilities": {
+        "citations": true,
+        "file_qa": true,
+        "language_detection": true,
+        "mcp": false,
+        "preview_mode": false,
+        "restore_n_source": true,
+        "returnFc": false,
+        "returnThink": false,
+        "vision": false,
+        "web_search": true
+      }
+    },
+    {
+      "id": "glm-4-flash",
+      "name": "任务专用",
+      "active": true,
+      "capabilities": {
+        "citations": true,
+        "language_detection": false,
+        "preview_mode": false,
+        "restore_n_source": false,
+        "vision": false,
+        "web_search": false
+      }
+    },
+    {
+      "id": "0808-360B-DR",
+      "name": "0808-360B-DR",
+      "active": true,
+      "capabilities": {
+        "citations": false,
+        "file_qa": true,
+        "language_detection": false,
+        "mcp": true,
+        "preview_mode": false,
+        "restore_n_source": false,
+        "returnFc": true,
+        "returnThink": true,
+        "think": true,
+        "vision": false,
+        "web_search": false
+      }
+    },
+    {
+      "id": "glm-4-air-250414",
+      "name": "GLM-4-32B",
+      "active": true,
+      "capabilities": {
+        "citations": false,
+        "file_qa": true,
+        "language_detection": false,
+        "mcp": false,
+        "preview_mode": false,
+        "restore_n_source": false,
+        "returnFc": false,
+        "returnThink": false,
+        "think": false,
+        "vision": false,
+        "web_search": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "checkedAt": "2026-09-06",
+  "build": "0137bac, 2026-09-05 12:44:46",
+  "method": "Downloaded public assets referenced by the jshook-observed Kimi page; decoded embedded protobuf descriptors and traced chat request construction. No authenticated generation was submitted.",
+  "files": [
+    {
+      "url": "https://statics.moonshot.cn/kimi-web-seo/assets/index-DTdm9LfL.js",
+      "sha256": "02cb8f9eb723ac9466f5dbf76223a39c76081ecdcd65af7c330b1ca0751fec45"
+    },
+    {
+      "url": "https://statics.moonshot.cn/kimi-web-seo/assets/suggest_pb-esNLJOHR.js",
+      "sha256": "a250f3bf9e758871644808630d7b3771deff7d1427bc9fe84b567919add99bab"
+    },
+    {
+      "url": "https://statics.moonshot.cn/kimi-web-seo/assets/kimi.chatMessages-B0bA2KNX.js",
+      "sha256": "5e299799aba698f7e8173a5f526b4453f36cf35e5d8a2be09312e7fffda728ad"
+    },
+    {
+      "url": "https://statics.moonshot.cn/kimi-web-seo/assets/user-C-Ex3gpD.js",
+      "sha256": "45cbef0244ad01678715cfe6fd83481de9a1855172441cfc3aa98e096a7bc19d"
+    }
+  ],
+  "entryIds": {
+    "plain-chat": "k2d6-chat",
+    "agent": "k3-agent",
+    "swarm": "k3-agent-swarm"
+  },
+  "request": {
+    "service": "kimi.gateway.chat.v1.ChatService/Chat",
+    "agentKimiPlusId": "ok-computer",
+    "optionFields": [
+      "thinking",
+      "reasoning_effort",
+      "context_length",
+      "model"
+    ],
+    "defaultThinking": true
+  },
+  "scenarioEnum": [
+    "SCENARIO_K2D5",
+    "SCENARIO_K3",
+    "SCENARIO_OK_COMPUTER",
+    "SCENARIO_OK_COMPUTER_SWARM"
+  ],
+  "absentScenario": "SCENARIO_K2D6",
+  "caveat": "The anonymous catalog uses legacy key/agentMode fields; Swarm has not been enabled because this differs from the new entry/scenario contract and its end-to-end stream has not been verified."
+}

@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "providerId": "deepseek",
+      "brand": "DeepSeek",
+      "sourcePage": "https://chat.deepseek.com/",
+      "sourceUrl": "https://fe-static.deepseek.com/chat/favicon.svg",
+      "retrievedAt": "2026-09-06",
+      "file": "deepseek.svg",
+      "format": "svg",
+      "sourceSha256": "90d7e400ca261d28dfb7982bfade335912b3a27a620faee9a787f8a52164fd43",
+      "localSha256": "becc2c2816737ae9c91aace27d928bfd8ab3f5c6280c4667c0de85bbb4a0336e",
+      "changes": "Removed unused xlink namespace; whitespace only. Original paths, viewBox and color retained."
+    },
+    {
+      "providerId": "glm",
+      "brand": "GLM / 智谱清言",
+      "sourcePage": "https://chatglm.cn/",
+      "sourceUrl": "https://chatglm.cn/favicon.ico",
+      "retrievedAt": "2026-09-06",
+      "file": "glm.png",
+      "format": "png",
+      "sourceSha256": "94e48956654f0b02d7a113628cdea50819579c6bccecec8888928f321c0f997d",
+      "localSha256": "94e48956654f0b02d7a113628cdea50819579c6bccecec8888928f321c0f997d",
+      "changes": "None; source is PNG despite its .ico URL, saved with the matching .png extension."
+    },
+    {
+      "providerId": "kimi",
+      "brand": "Kimi",
+      "sourcePage": "https://www.kimi.com/",
+      "sourceUrl": "https://www.kimi.com/pwa-192.png",
+      "retrievedAt": "2026-09-06",
+      "file": "kimi.png",
+      "format": "png",
+      "sourceSha256": "6c14f9c3062e953b3ed57ae3e19db931c1c1bba38d4d8d55550544f31d55e469",
+      "localSha256": "6c14f9c3062e953b3ed57ae3e19db931c1c1bba38d4d8d55550544f31d55e469",
+      "changes": "None; original image bytes."
+    },
+    {
+      "providerId": "minimax",
+      "brand": "MiniMax Agent",
+      "sourcePage": "https://agent.minimax.io/",
+      "sourceUrl": "https://agent.minimax.io/assets/logo/apple-touch_v2.png",
+      "retrievedAt": "2026-09-06",
+      "file": "minimax.png",
+      "format": "png",
+      "sourceSha256": "22f67fd8f681ae6dd3891a26d934315abc589c44fa541f1bbb63d6506e859e8b",
+      "localSha256": "22f67fd8f681ae6dd3891a26d934315abc589c44fa541f1bbb63d6506e859e8b",
+      "changes": "None; original image bytes."
+    },
+    {
+      "providerId": "qwen",
+      "brand": "Qwen / 千问",
+      "sourcePage": "https://www.qianwen.com/",
+      "sourceUrl": "https://img.alicdn.com/imgextra/i2/O1CN01taBbMS1CfyJoOt0lB_!!6000000000109-2-tps-80-80.png",
+      "retrievedAt": "2026-09-06",
+      "file": "qwen.png",
+      "format": "png",
+      "sourceSha256": "cd9390bc4209c319121d111f3a1f535b3c7dd909b8f860d41acc9744138d58df",
+      "localSha256": "cd9390bc4209c319121d111f3a1f535b3c7dd909b8f860d41acc9744138d58df",
+      "changes": "None; original image bytes."
+    },
+    {
+      "providerId": "qwen-ai",
+      "brand": "Qwen Chat",
+      "sourcePage": "https://chat.qwen.ai/",
+      "sourceUrl": "https://assets.alicdn.com/g/qwenweb/qwen-chat-fe/0.2.91/favicon.png",
+      "retrievedAt": "2026-09-06",
+      "file": "qwen.png",
+      "format": "png",
+      "sourceSha256": "cd9390bc4209c319121d111f3a1f535b3c7dd909b8f860d41acc9744138d58df",
+      "localSha256": "cd9390bc4209c319121d111f3a1f535b3c7dd909b8f860d41acc9744138d58df",
+      "changes": "None; verified byte-identical to the Qianwen favicon and shares its local file."
+    },
+    {
+      "providerId": "zai",
+      "brand": "Z.ai",
+      "sourcePage": "https://chat.z.ai/",
+      "sourceUrl": "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+      "retrievedAt": "2026-09-06",
+      "file": "zai.svg",
+      "format": "svg",
+      "sourceSha256": "07a45e8e35b0b631ed2c68cd1cb041f9721b1ceeb0bd0e34f1459b0304a741c7",
+      "localSha256": "effea28464121194265f74d4ad8c2d5cf9406a86e5924a01f6e2090e0f6f4661",
+      "changes": "Removed XML declaration, generator comment, unused namespace/root metadata and unused stylesheet. Inlined the two used CSS classes without changing their values or geometry."
+    },
+    {
+      "providerId": "perplexity",
+      "brand": "Perplexity",
+      "sourcePage": "https://docs.perplexity.ai/docs/getting-started/overview",
+      "sourceUrl": "https://docs.perplexity.ai/mintlify-assets/_mintlify/favicons/perplexity/rSPP83rcZL_iw-xo/_generated/favicon/android-chrome-192x192.png",
+      "retrievedAt": "2026-09-06",
+      "file": "perplexity.png",
+      "format": "png",
+      "sourceSha256": "97d8e57726298a7af87446aa79888562d8cbeb16757c2b10eaf90499cec8c9c3",
+      "localSha256": "97d8e57726298a7af87446aa79888562d8cbeb16757c2b10eaf90499cec8c9c3",
+      "changes": "None; original image bytes."
+    },
+    {
+      "providerId": "mimo",
+      "brand": "Xiaomi MiMo",
+      "sourcePage": "https://mimo.xiaomi.com/",
+      "sourceUrl": "https://cdn.cnbj1.fds.api.mi-img.com/aife/mimo-blog-fe/doc_build/mimo.ico",
+      "retrievedAt": "2026-09-06",
+      "file": "mimo.ico",
+      "format": "ico",
+      "sourceSha256": "fc3c0ff6c811da899f3a2f42f36944b7fcc0cb0a57e4ceba32770e5e9a88a2e5",
+      "localSha256": "fc3c0ff6c811da899f3a2f42f36944b7fcc0cb0a57e4ceba32770e5e9a88a2e5",
+      "changes": "None; original image bytes."
+    },
+    {
+      "providerId": "arena",
+      "brand": "Arena",
+      "sourcePage": "https://arena.ai/",
+      "sourceUrl": "https://arena.ai/apple-touch-icon.png",
+      "retrievedAt": "2026-09-06",
+      "file": "arena.png",
+      "format": "png",
+      "sourceSha256": "5077af51ff4aed20b82d014495d4c691aa55c74c3430b48d9205814fa0ad368c",
+      "localSha256": "5077af51ff4aed20b82d014495d4c691aa55c74c3430b48d9205814fa0ad368c",
+      "changes": "None; original image bytes."
+    }
+  ]
+}

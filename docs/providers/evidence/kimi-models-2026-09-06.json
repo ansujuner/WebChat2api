@@ -1,0 +1,119 @@
+{
+  "checkedAt": "2026-09-06",
+  "url": "https://www.kimi.com/apiv2/kimi.gateway.config.v1.ConfigService/GetAvailableModels",
+  "status": 200,
+  "data": {
+    "availableModels": [
+      {
+        "scenario": "SCENARIO_K2D5",
+        "displayName": "Instant",
+        "description": "Fast chat, quick replies",
+        "inputPlaceholder": "Ask anything. Images work too.",
+        "key": "k2d6",
+        "reasoningEffortOptions": [
+          {
+            "effort": "REASONING_EFFORT_NONE",
+            "displayName": "Standard"
+          },
+          {
+            "effort": "REASONING_EFFORT_LOW",
+            "displayName": "High"
+          }
+        ],
+        "defaultReasoningEffort": "REASONING_EFFORT_LOW"
+      },
+      {
+        "scenario": "SCENARIO_OK_COMPUTER",
+        "displayName": "K3",
+        "description": "Chat & Agent, flagship all-rounder",
+        "kimiPlusId": "ok-computer",
+        "agentMode": "TYPE_NORMAL",
+        "inputPlaceholder": "Ask anything, or task an agent...",
+        "key": "k3",
+        "switchableTo": [
+          "k3-agent-ultra"
+        ],
+        "reasoningEffortOptions": [
+          {
+            "effort": "REASONING_EFFORT_LOW",
+            "displayName": "Standard"
+          },
+          {
+            "effort": "REASONING_EFFORT_HIGH",
+            "displayName": "High"
+          },
+          {
+            "effort": "REASONING_EFFORT_MAX",
+            "displayName": "Max",
+            "description": "Consumes more credits"
+          }
+        ],
+        "defaultReasoningEffort": "REASONING_EFFORT_HIGH",
+        "contextLengthOptions": [
+          {
+            "contextLength": "CONTEXT_LENGTH_L",
+            "displayName": "Standard",
+            "available": true
+          },
+          {
+            "contextLength": "CONTEXT_LENGTH_XL",
+            "displayName": "Extra Long",
+            "description": "Up to 1M tokens; consumes more credits",
+            "label": "Allegro plan only",
+            "minMembershipLevel": "LEVEL_ADVANCED"
+          }
+        ],
+        "defaultContextLength": "CONTEXT_LENGTH_L"
+      },
+      {
+        "scenario": "SCENARIO_OK_COMPUTER",
+        "displayName": "K3 Swarm",
+        "description": "Massive search, batch processing, and more in one go",
+        "kimiPlusId": "ok-computer",
+        "agentMode": "TYPE_ULTRA",
+        "inputPlaceholder": "Assign a task to your AI team...",
+        "key": "k3-agent-ultra",
+        "switchableTo": [
+          "k3"
+        ],
+        "reasoningEffortOptions": [
+          {
+            "effort": "REASONING_EFFORT_LOW",
+            "displayName": "Standard"
+          },
+          {
+            "effort": "REASONING_EFFORT_HIGH",
+            "displayName": "High"
+          },
+          {
+            "effort": "REASONING_EFFORT_MAX",
+            "displayName": "Max",
+            "description": "Consumes more credits"
+          }
+        ],
+        "defaultReasoningEffort": "REASONING_EFFORT_HIGH",
+        "contextLengthOptions": [
+          {
+            "contextLength": "CONTEXT_LENGTH_L",
+            "displayName": "Standard",
+            "available": true
+          },
+          {
+            "contextLength": "CONTEXT_LENGTH_XL",
+            "displayName": "Extra Long",
+            "description": "Up to 1M tokens; consumes more credits",
+            "label": "Allegro plan only",
+            "minMembershipLevel": "LEVEL_ADVANCED"
+          }
+        ],
+        "defaultContextLength": "CONTEXT_LENGTH_L",
+        "minMembershipLevel": "LEVEL_BASIC",
+        "greeting": "Swarm stands ready.Tap into any skills you need. One run, multiple outputs across formats"
+      }
+    ],
+    "defaultScenario": {
+      "scenario": "SCENARIO_K2D5",
+      "model": "k2d6-chat"
+    }
+  }
+}

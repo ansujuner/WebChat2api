@@ -1,0 +1,75 @@
+{
+  "checkedAt": "2026-09-06",
+  "url": "https://chatglm.cn/chatglm/agent-api/operation/detail?tag=available_models",
+  "status": 200,
+  "models": [
+    {
+      "am_description": "",
+      "am_switch": true,
+      "chat_switch": true,
+      "description": "",
+      "display_name": "GLM-5.3",
+      "display_tag": [],
+      "reasoning_efforts": [
+        {
+          "am_effort": "low",
+          "description": "",
+          "display_name": "快速",
+          "effort": ""
+        },
+        {
+          "am_effort": "high",
+          "description": "处理复杂任务",
+          "display_name": "深度",
+          "effort": "thinking"
+        },
+        {
+          "am_effort": "max",
+          "description": "全力推理，耗时更长",
+          "display_name": "极致",
+          "effort": "deep_thinking"
+        }
+      ],
+      "selected_model": "glm-5.3"
+    },
+    {
+      "am_description": "5.3-Flash，积分消耗大幅降低",
+      "am_switch": true,
+      "chat_switch": true,
+      "description": "5.3-Flash，回复速度快",
+      "display_name": "GLM-Flash",
+      "display_tag": [
+        "new"
+      ],
+      "reasoning_efforts": [
+        {
+          "am_effort": "low",
+          "description": "",
+          "display_name": "快速",
+          "effort": ""
+        },
+        {
+          "am_effort": "high",
+          "description": "处理复杂任务",
+          "display_name": "深度",
+          "effort": "thinking"
+        },
+        {
+          "am_effort": "max",
+          "description": "全力推理，耗时更长",
+          "display_name": "极致",
+          "effort": "deep_thinking"
+        }
+      ],
+      "selected_model": "glm-5.3-flash"
+    }
+  ],
+  "defaults": {
+    "agent": "glm-5.3-flash",
+    "am": "glm-5.3-flash",
+    "guest": "glm-5.3-flash",
+    "non_vip": "glm-5.3-flash",
+    "svip": "glm-5.3-flash",
+    "vip": "glm-5.3-flash"
+  }
+}

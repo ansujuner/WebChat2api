@@ -1,0 +1,63 @@
+{
+  "checkedAt": "2026-09-06",
+  "url": "https://chat2-api.qianwen.com/api/v1/model/list",
+  "status": 200,
+  "models": [
+    {
+      "thirdParty": false,
+      "newTag": false,
+      "expanded": true,
+      "answerShow": false,
+      "defaultModel": true,
+      "modelCode": "Qwen",
+      "displayModelName": "Qwen3.7-千问",
+      "show": true,
+      "supportMultiModal": false,
+      "describe": "综合AI助手，全面回答工作、学习、生活各类问题",
+      "modelTag": [],
+      "legacyModelCode": "Qwen"
+    },
+    {
+      "thirdParty": false,
+      "newTag": true,
+      "expanded": true,
+      "answerShow": true,
+      "defaultModel": false,
+      "modelCode": "Qwen3.8-Max",
+      "displayModelName": "Qwen3.8-Max",
+      "show": true,
+      "supportMultiModal": false,
+      "describe": "最新 Max 旗舰模型，擅长视觉理解任务",
+      "modelTag": [],
+      "legacyModelCode": "tongyi-qwen3.8-max-model"
+    },
+    {
+      "thirdParty": false,
+      "newTag": false,
+      "expanded": true,
+      "answerShow": true,
+      "defaultModel": false,
+      "modelCode": "Qwen3.7-Max",
+      "displayModelName": "Qwen3.7-Max",
+      "show": true,
+      "supportMultiModal": false,
+      "describe": "擅长代码编写，处理复杂任务",
+      "modelTag": [],
+      "legacyModelCode": "tongyi-qwen3-max-model"
+    },
+    {
+      "thirdParty": false,
+      "newTag": false,
+      "expanded": true,
+      "answerShow": true,
+      "defaultModel": true,
+      "modelCode": "Qwen3.6-Flash",
+      "displayModelName": "Qwen3.6-Flash",
+      "show": true,
+      "supportMultiModal": false,
+      "describe": "适用于简单任务，响应速度快",
+      "modelTag": [],
+      "legacyModelCode": "tongyi-qwen36-plus-model"
+    }
+  ]
+}

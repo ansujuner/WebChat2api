@@ -1,0 +1,34 @@
+WebChat2api is a modified version of Chat2API.
+
+Original project notices retained:
+  Chat2API - Multi-platform AI Service Unified Management Tool
+  Copyright (C) 2026 Chat2API Team
+  Upstream link supplied by the original project:
+  https://github.com/xiaoY233/Chat2API
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+A complete, unmodified copy of GNU GPL version 3 is in LICENSE.
+SPDX-License-Identifier: GPL-3.0-or-later
+
+WebChat2api modifications: 2026-09-06; maintained at
+https://github.com/ansujuner/WebChat2api
+See MODIFICATIONS.md for the changed behavior and build instructions.
+The supplied working copy was not a Git checkout; no upstream commit
+identity or original Git history is claimed for this initial import.
+
+Provider trademarks and logos identify compatible services. They are
+not endorsements, and are not relicensed as GPL software by this project.
+See THIRD_PARTY_ASSETS.md for their original sources and rights notices.
+Dependencies retain their own licenses. package-lock.json pins their
+versions; inspect each dependency's distributed license before shipping
+an installer. No provider credentials or local browser profiles form
+part of the published source.

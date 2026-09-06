@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png -text
+*.ico -text
+*.wasm -text
+# Published asset hashes refer to original/local bytes, not platform-normalized copies.
+*.svg -text
+LICENSE text eol=lf

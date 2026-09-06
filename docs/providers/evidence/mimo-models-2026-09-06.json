@@ -1,0 +1,128 @@
+{
+  "checkedAt": "2026-09-06",
+  "url": "https://aistudio.xiaomimimo.com/open-apis/bot/config",
+  "status": 200,
+  "code": 0,
+  "models": [
+    {
+      "name": "mimo-v2-flash-studio",
+      "model": "mimo-v2-flash",
+      "temperature": 0.8,
+      "topP": 0.95,
+      "thinkingDefaultOn": true,
+      "webSearchDefaultStatus": "disabled",
+      "showThinking": false,
+      "showWebSearch": false
+    },
+    {
+      "name": "mimo-v2-pro",
+      "model": "mimo-v2-pro",
+      "temperature": 0.8,
+      "topP": 0.95,
+      "thinkingDefaultOn": true,
+      "webSearchDefaultStatus": "auto",
+      "showThinking": false,
+      "showWebSearch": false
+    },
+    {
+      "name": "mimo-omni",
+      "model": "mimo-v2-omni",
+      "temperature": 0.8,
+      "topP": 0.95,
+      "thinkingDefaultOn": true,
+      "webSearchDefaultStatus": "auto",
+      "showThinking": false,
+      "showWebSearch": false
+    },
+    {
+      "name": "mimo-v2.5-pro",
+      "model": "mimo-v2.5-pro",
+      "temperature": 0.8,
+      "topP": 0.95,
+      "thinkingDefaultOn": true,
+      "webSearchDefaultStatus": "auto",
+      "showThinking": false,
+      "showWebSearch": false
+    },
+    {
+      "name": "mimo-omni",
+      "model": "mimo-v2.5",
+      "temperature": 0.8,
+      "topP": 0.95,
+      "thinkingDefaultOn": true,
+      "webSearchDefaultStatus": "auto",
+      "showThinking": false,
+      "showWebSearch": false
+    },
+    {
+      "name": "mimo-v2-flash-studio",
+      "model": "mimo-v2-flash-studio",
+      "temperature": null,
+      "topP": null,
+      "thinkingDefaultOn": null,
+      "webSearchDefaultStatus": null,
+      "showThinking": null,
+      "showWebSearch": null
+    },
+    {
+      "name": "mimo-omni",
+      "model": "clawm-alpha",
+      "temperature": null,
+      "topP": null,
+      "thinkingDefaultOn": null,
+      "webSearchDefaultStatus": null,
+      "showThinking": null,
+      "showWebSearch": null
+    },
+    {
+      "name": "mimo-V2-pro",
+      "model": "clawl-alpha",
+      "temperature": null,
+      "topP": null,
+      "thinkingDefaultOn": null,
+      "webSearchDefaultStatus": null,
+      "showThinking": null,
+      "showWebSearch": null
+    },
+    {
+      "name": "mimo-omni",
+      "model": "mimo-v2.1-omni",
+      "temperature": null,
+      "topP": null,
+      "thinkingDefaultOn": null,
+      "webSearchDefaultStatus": null,
+      "showThinking": null,
+      "showWebSearch": null
+    },
+    {
+      "name": "mimo-omni",
+      "model": "mimo-v2.1-omni-preview",
+      "temperature": null,
+      "topP": null,
+      "thinkingDefaultOn": null,
+      "webSearchDefaultStatus": null,
+      "showThinking": null,
+      "showWebSearch": null
+    },
+    {
+      "name": "mimo-v2.1-pro",
+      "model": "mimo-v2.1-pro",
+      "temperature": null,
+      "topP": null,
+      "thinkingDefaultOn": null,
+      "webSearchDefaultStatus": null,
+      "showThinking": null,
+      "showWebSearch": null
+    },
+    {
+      "name": "mimo-v2.1-pro",
+      "model": "mimo-v2.1-pro-preview",
+      "temperature": null,
+      "topP": null,
+      "thinkingDefaultOn": null,
+      "webSearchDefaultStatus": null,
+      "showThinking": null,
+      "showWebSearch": null
+    }
+  ]
+}
