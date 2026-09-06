@@ -46,6 +46,7 @@ function fixture(zaiResponse) {
   const makeAnswer = () => ({ id: 'upstream-thread', object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: 'fixture answer' }, finish_reason: 'stop' }] })
   const asChunks = () => `data: ${JSON.stringify({ id: 'upstream-thread', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'fixture answer' }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: 'upstream-thread', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`
   const imports = {
+    '../providers/customApi': require('../../src/main/providers/customApi.ts'),
     axios: { default: { create: () => ({ request: () => assert.fail('no network allowed') }) } },
     './conversationContinuity': continuityModule,
     '../../shared/accountAvailability': require('../../src/shared/accountAvailability.ts'),

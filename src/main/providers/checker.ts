@@ -5,6 +5,7 @@ import type { BuiltinProviderConfig } from '../store/types'
 import { arenaBrowserManager } from '../arena/browserManager'
 import { arenaProfileCredentials } from './arenaCatalog'
 import { fetchArenaProviderModels } from './arenaIntegration'
+import { fetchCustomModels } from './customApi'
 
 const CHECK_TIMEOUT = 15000
 
@@ -657,44 +658,12 @@ export class ProviderChecker {
     account: Account
   ): Promise<TokenCheckResult> {
     try {
-      const headers: Record<string, string> = {
-        ...provider.headers,
-      }
-      
-      const credentials = account.credentials
-      if (credentials.token) {
-        headers['Authorization'] = `Bearer ${credentials.token}`
-      } else if (credentials.apiKey) {
-        headers['Authorization'] = `Bearer ${credentials.apiKey}`
-      }
-      
-      const response = await axios({
-        method: 'GET',
-        url: `${provider.apiEndpoint}/models`,
-        headers,
-        timeout: CHECK_TIMEOUT,
-        validateStatus: () => true,
-      })
-      
-      if (response.status >= 200 && response.status < 300) {
-        return { valid: true }
-      }
-      
-      if (response.status === 401) {
-        return { valid: false, error: 'Authentication failed, please check credentials' }
-      }
-      
-      return { valid: false, error: `Validation failed: HTTP ${response.status}` }
+      await fetchCustomModels(provider, account.credentials)
+      return { valid: true }
     } catch (error) {
-      return {
-        valid: false,
-        error: error instanceof AxiosError 
-          ? error.message 
-          : 'Connection failed',
-      }
+      return { valid: false, error: error instanceof Error ? error.message : 'Custom API validation failed' }
     }
   }
-
   private static generateUUID(): string {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
       const r = (Math.random() * 16) | 0

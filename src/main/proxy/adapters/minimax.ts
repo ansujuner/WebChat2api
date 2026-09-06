@@ -74,6 +74,7 @@ interface MiniMaxMessage {
 }
 
 interface ChatCompletionRequest extends ConversationRequestOptions {
+  toolCallingPlan?: import('../toolCalling/types').ToolCallingPlan
   model: string
   originalModel?: string
   messages: MiniMaxMessage[]
@@ -567,7 +568,7 @@ export class MiniMaxAdapter {
         await this.deleteChat(chatId)
       } : undefined
       
-      const transStream = this.createPollingStream(chatId, deviceInfo, this.model, msgId, onEnd, request.onConversation)
+      const transStream = this.createPollingStream(chatId, deviceInfo, this.model, msgId, onEnd, request.onConversation, request.toolCallingPlan)
       return { 
         response: null, 
         stream: { session: null as any, stream: transStream as any }, 
@@ -590,7 +591,8 @@ export class MiniMaxAdapter {
     
     const content = aiMessage?.msg_content || ''
     const thinkingContent = aiMessage?.extra_info?.thinking_content || ''
-    const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'minimax')
+    const { content: cleanContent, toolCalls } = request.toolCallingPlan
+      ? { content, toolCalls: [] } : parseToolCallsFromText(content, 'minimax')
     
     const response = {
       status: 200,
@@ -652,7 +654,7 @@ export class MiniMaxAdapter {
     throw new Error(`No AI response after ${maxPolls} polls`)
   }
 
-  private createPollingStream(chatId: string, deviceInfo: DeviceInfo, model: string, requestMessageId: string, onEnd?: (chatId: string) => Promise<void>, onConversation?: ConversationRequestOptions['onConversation']): PassThrough {
+  private createPollingStream(chatId: string, deviceInfo: DeviceInfo, model: string, requestMessageId: string, onEnd?: (chatId: string) => Promise<void>, onConversation?: ConversationRequestOptions['onConversation'], toolCallingPlan?: import('../toolCalling/types').ToolCallingPlan): PassThrough {
     const transStream = new PassThrough()
     const created = this.created
     let lastContent = ''
@@ -660,7 +662,7 @@ export class MiniMaxAdapter {
     let pollCount = 0
     const maxPolls = 120
     const pollInterval = 500
-    const toolCallState = createToolCallState()
+    const toolCallState = createToolCallState(toolCallingPlan)
     const controller = new AbortController()
     let cancelWait: (() => void) | undefined
     const waitForPoll = () => new Promise<void>(resolve => {

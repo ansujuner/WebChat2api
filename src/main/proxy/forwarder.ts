@@ -27,6 +27,7 @@ import { ArenaAdapter } from './adapters/arena'
 import { ArenaStreamHandler } from './adapters/arena-stream'
 import { ArenaError } from '../arena/protocol'
 import { ToolCallingEngine } from './toolCalling/ToolCallingEngine'
+import { customApiUrl, customRequestHeaders } from '../providers/customApi'
 import type { ToolCallingTransformResult } from './toolCalling/types'
 import { sessionManager } from './sessionManager'
 import { getConversationOptions, setConversationAbortSignal } from './conversationContinuity'
@@ -153,7 +154,7 @@ export class RequestForwarder {
   ]
 
   supportsConversation(provider: Provider): boolean {
-    return this.providerForwarders.some(entry => entry.matches(provider))
+    return provider.type !== 'custom' && this.providerForwarders.some(entry => entry.matches(provider))
   }
 
   /** Local exact-account probe: no routing/retries or manual switch changes; official restriction handling remains active. */
@@ -269,7 +270,7 @@ export class RequestForwarder {
   }
 
   conversationKind(provider: Provider): string | undefined {
-    return this.providerForwarders.find(entry => entry.matches(provider))?.name
+    return provider.type === 'custom' ? undefined : this.providerForwarders.find(entry => entry.matches(provider))?.name
   }
 
   /**
@@ -407,7 +408,7 @@ export class RequestForwarder {
     const config = storeManager.getConfig()
     const retained = getForwardConversationOptions(request).retainConversation
     // A retry could append the same input twice after an uncertain upstream response.
-    const maxRetries = retained || this.supportsConversation(provider) ? 0 : config.retryCount
+    const maxRetries = retained || this.supportsConversation(provider) || request.tools?.length || request.messages.some(message => message.role === 'tool') ? 0 : config.retryCount
 
     let lastError: string | undefined
 
@@ -418,7 +419,10 @@ export class RequestForwarder {
 
       let modifiedRequest = request
 
-      if (!retained && config.contextManagement?.enabled && modifiedRequest.messages && modifiedRequest.messages.length > 0) {
+      // Summarization drops assistant call IDs / tool results and can create an
+      // extra unrequested generation. A native tool exchange must stay intact.
+      const hasToolExchange = !!modifiedRequest.tools?.length || modifiedRequest.messages.some(message => message.role === 'tool' || message.tool_calls?.length)
+      if (!retained && !hasToolExchange && config.contextManagement?.enabled && modifiedRequest.messages && modifiedRequest.messages.length > 0) {
         try {
           const summaryGenerator = this.createSummaryGenerator(
             account,
@@ -537,7 +541,8 @@ export class RequestForwarder {
       provider = freshProvider
     }
 
-    const dedicatedForwarder = this.providerForwarders.find(forwarder => forwarder.matches(provider))
+    // A user-defined OpenAI API must not be hijacked by website hostname detection.
+    const dedicatedForwarder = provider.type === 'custom' ? undefined : this.providerForwarders.find(forwarder => forwarder.matches(provider))
     if (dedicatedForwarder) {
       return dedicatedForwarder.forward(request, account, provider, actualModel, startTime)
     }
@@ -556,6 +561,7 @@ export class RequestForwarder {
         timeout: proxyStatusManager.getConfig().timeout,
         responseType: request.stream ? 'stream' : 'json',
         validateStatus: () => true,
+        ...(provider.type === 'custom' ? { maxRedirects: 0 } : {}),
         signal: getForwardConversationOptions(request).signal,
         ...(probe ? { maxContentLength: PROBE_RESPONSE_LIMIT, maxBodyLength: 16 * 1024 } : {}),
       }
@@ -563,7 +569,13 @@ export class RequestForwarder {
       const response: AxiosResponse = await this.axiosInstance.request(axiosConfig)
       const latency = Date.now() - startTime
 
-      if (response.status >= 400) {
+      if (response.status >= 400 || (provider.type === 'custom' && response.status >= 300)) {
+        if (provider.type === 'custom') {
+          // A remote API may echo request secrets in prose or HTML. Do not put
+          // that body into client errors, request logs, or desktop diagnostics.
+          if (typeof response.data?.destroy === 'function') response.data.destroy()
+          return this.customApiFailure(response.status, latency, response.headers)
+        }
         return {
           success: false,
           status: response.status,
@@ -592,6 +604,14 @@ export class RequestForwarder {
     } catch (error) {
       const latency = Date.now() - startTime
 
+      if (provider.type === 'custom' && !(probe && error instanceof AxiosError && /^maxContentLength size of \d+ exceeded$/.test(error.message))) {
+        if (error instanceof AxiosError) {
+          if (typeof error.response?.data?.destroy === 'function') error.response.data.destroy()
+          return this.customApiFailure(error.response?.status, latency, error.response?.headers)
+        }
+        return this.customApiFailure(undefined, latency)
+      }
+
       if (error instanceof AxiosError) {
         if (probe && /^maxContentLength size of \d+ exceeded$/.test(error.message)) return {
           success: false, status: 502, errorCode: 'account_probe_response_too_large',
@@ -611,6 +631,14 @@ export class RequestForwarder {
         latency,
       }
     }
+  }
+
+  private customApiFailure(status: unknown, latency: number, headers?: any): ForwardResult {
+    const httpStatus = typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599 ? status : 502
+    const code = ({ 401: 'authentication_required', 403: 'access_denied', 404: 'model_unavailable', 429: 'rate_limited' } as Record<number, string>)[httpStatus] ?? 'upstream_error'
+    const retryAfter = headers?.['retry-after']
+    return { success: false, status: httpStatus, errorCode: code, error: `Custom API request failed: ${code}.`, latency,
+      ...(typeof retryAfter === 'string' && /^\d{1,10}$/.test(retryAfter) ? { headers: { 'retry-after': retryAfter } } : {}) }
   }
 
   /**
@@ -1082,7 +1110,7 @@ export class RequestForwarder {
         }
       }
 
-      const handler = new QwenAiStreamHandler(actualModel)
+      const handler = new QwenAiStreamHandler(actualModel, undefined, transformed.plan)
       attachConversationListener(request, handler)
       handler.setChatId(chatId)
 
@@ -1188,7 +1216,7 @@ export class RequestForwarder {
           }
         : undefined
 
-      const handler = new ZaiStreamHandler(actualModel, deleteChatCallback)
+      const handler = new ZaiStreamHandler(actualModel, deleteChatCallback, transformed.plan)
       attachConversationListener(request, handler)
       handler.setChatId(chatId)
       
@@ -1224,7 +1252,7 @@ export class RequestForwarder {
       }
     } catch (error) {
       const latency = Date.now() - startTime
-      if (accountProbeRequests.has(request)) {
+      if (accountProbeRequests.has(request) || error instanceof ZaiUpstreamError) {
         // Only typed adapter failures may influence probe classification; never parse
         // arbitrary exception prose or export the raw provider message/upstreamCode.
         let status = 502, errorCode = 'upstream_error'
@@ -1243,6 +1271,14 @@ export class RequestForwarder {
             case 'transport_error': errorCode = 'transport_error'; break
             case 'upstream_error': break
           }
+        }
+        if (error instanceof ZaiUpstreamError && !accountProbeRequests.has(request)) {
+          // Keep the structured category for API callers and tool diagnostics too.
+          // The website often reports a CAPTCHA in an otherwise HTTP-200 stream.
+          const category = ['captcha_required', 'verification_required', 'access_denied', 'quota_exceeded'].includes(error.category)
+            ? error.category : errorCode
+          return { success: false, status, errorCode: category,
+            error: `Z.ai upstream ${category}`, latency }
         }
         return { success: false, status, errorCode,
           error: 'Z.ai account test failed. Check the reported category; the request was not retried.', latency }
@@ -1274,6 +1310,7 @@ export class RequestForwarder {
       const adapter = new MiniMaxAdapter(provider, account)
       const { response, stream, chatId } = await adapter.chatCompletion({
         ...getForwardConversationOptions(request),
+        toolCallingPlan: transformed.plan,
         model: actualModel,
         originalModel: request.model,
         messages: transformed.messages as any,
@@ -1535,7 +1572,7 @@ export class RequestForwarder {
             }
           : undefined
 
-        const handler = new PerplexityStreamHandler(actualModel, sessionId, deleteSessionCallback, adapter)
+        const handler = new PerplexityStreamHandler(actualModel, sessionId, deleteSessionCallback, adapter, transformed.plan)
         attachConversationListener(request, handler)
         const transformedStream = await handler.handleStream(responseData)
         
@@ -1550,7 +1587,7 @@ export class RequestForwarder {
         }
       }
 
-      const handler = new PerplexityStreamHandler(actualModel, sessionId, undefined, adapter)
+      const handler = new PerplexityStreamHandler(actualModel, sessionId, undefined, adapter, transformed.plan)
       attachConversationListener(request, handler)
       const result = await handler.handleNonStream(responseData)
       
@@ -1582,6 +1619,7 @@ export class RequestForwarder {
    * Build URL
    */
   private buildUrl(provider: Provider, path: string): string {
+    if (provider.type === 'custom') return customApiUrl(provider, '/chat/completions')
     let baseUrl = provider.apiEndpoint
 
     if (baseUrl.endsWith('/')) {
@@ -1603,6 +1641,7 @@ export class RequestForwarder {
    * Build Request Headers
    */
   private buildHeaders(provider: Provider, account: Account): Record<string, string> {
+    if (provider.type === 'custom') return { 'Content-Type': 'application/json', ...customRequestHeaders(provider, account.credentials) }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...provider.headers,
@@ -1680,6 +1719,12 @@ export class RequestForwarder {
     if (request.user !== undefined) {
       body.user = request.user
     }
+
+    // Custom OpenAI-compatible APIs execute native tools. Dropping these fields
+    // silently turns every tool request into an ordinary text-only generation.
+    if (request.tools !== undefined) body.tools = request.tools
+    if (request.tool_choice !== undefined) body.tool_choice = request.tool_choice
+    if (request.parallel_tool_calls !== undefined) body.parallel_tool_calls = request.parallel_tool_calls
 
     return body
   }

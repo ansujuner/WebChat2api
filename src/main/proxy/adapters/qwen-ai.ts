@@ -8,7 +8,9 @@ import axios, { AxiosResponse } from 'axios'
 import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
-import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
+import type { ToolCallingPlan } from '../toolCalling/types'
+import { StringDecoder } from 'node:string_decoder'
+import { createToolCallState, processStreamContent, flushToolCallBuffer, createBaseChunk, type ToolCallState } from '../utils/streamToolHandler'
 import type { ConversationRequestOptions, ProviderConversationState } from '../conversationTypes'
 import { getProviderToolProfile } from '../toolCalling/providerProfiles'
 
@@ -377,12 +379,13 @@ export class QwenAiStreamHandler {
   private onEnd?: (chatId: string) => void
   private responseId: string = ''
   private content: string = ''
-  private toolCallsSent: boolean = false
+  private toolCallState: ToolCallState
 
-  constructor(model: string, onEnd?: (chatId: string) => void) {
+  constructor(model: string, onEnd?: (chatId: string) => void, toolCallingPlan?: ToolCallingPlan) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
+    this.toolCallState = createToolCallState(toolCallingPlan)
   }
 
   setChatId(chatId: string) {
@@ -405,61 +408,15 @@ export class QwenAiStreamHandler {
     }
   }
 
-  private sendToolCalls(transStream: PassThrough): void {
-    if (this.toolCallsSent) return
-    
-    const toolCalls = parseToolUse(this.content)
-    if (toolCalls && toolCalls.length > 0) {
-      this.toolCallsSent = true
-      
-      // Send tool_calls delta
-      for (let i = 0; i < toolCalls.length; i++) {
-        const tc = toolCalls[i]
-        transStream.write(
-          `data: ${JSON.stringify({
-            id: this.responseId || this.chatId,
-            model: this.model,
-            object: 'chat.completion.chunk',
-            choices: [{
-              index: 0,
-              delta: {
-                tool_calls: [{
-                  index: i,
-                  id: tc.id,
-                  type: 'function',
-                  function: {
-                    name: tc.function.name,
-                    arguments: tc.function.arguments,
-                  },
-                }],
-              },
-              finish_reason: null,
-            }],
-            created: this.created,
-          })}\n\n`
-        )
-      }
-      
-      // Send finish with tool_calls
-      transStream.write(
-        `data: ${JSON.stringify({
-          id: this.responseId || this.chatId,
-          model: this.model,
-          object: 'chat.completion.chunk',
-          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
-          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          created: this.created,
-        })}\n\n`
-      )
-      transStream.end('data: [DONE]\n\n')
-      if (this.onEnd && this.chatId) {
-        this.onEnd(this.chatId)
-      }
-    }
+  private sendContent(content: string, transStream: PassThrough): void {
+    const base = createBaseChunk(this.responseId || this.chatId, this.model, this.created)
+    const { chunks } = processStreamContent(content, this.toolCallState, base, false, 'qwen-ai')
+    for (const chunk of chunks) transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
   }
 
   async handleStream(stream: any): Promise<PassThrough> {
     const transStream = new PassThrough()
+    const decoder = new StringDecoder('utf8')
     transStream.once('close', () => {
       if (!transStream.writableEnded && typeof stream.destroy === 'function') stream.destroy()
     })
@@ -595,14 +552,7 @@ export class QwenAiStreamHandler {
               
               if (content) {
                 console.log('[QwenAI] Sending content chunk:', content)
-                const chunk = {
-                  id: this.responseId || this.chatId,
-                  model: this.model,
-                  object: 'chat.completion.chunk',
-                  choices: [{ index: 0, delta: { content }, finish_reason: null }],
-                  created: this.created,
-                }
-                transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+                this.sendContent(content, transStream)
                 console.log('[QwenAI] Content chunk written')
               }
             } else if (phase === null && content) {
@@ -612,25 +562,13 @@ export class QwenAiStreamHandler {
               // Accumulate content for tool call detection
               this.content += content
               
-              const chunk = {
-                id: this.responseId || this.chatId,
-                model: this.model,
-                object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: { content }, finish_reason: null }],
-                created: this.created,
-              }
-              transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+              this.sendContent(content, transStream)
             }
 
             if (status === 'finished' && (phase === 'answer' || phase === null)) {
-              // Check for tool calls before sending stop
-              if (hasToolUse(this.content)) {
-                console.log('[QwenAI] Found tool_use in stream, sending tool_calls')
-                this.sendToolCalls(transStream)
-                return
-              }
-              
-              const finishReason = delta.finish_reason || 'stop'
+              const base = createBaseChunk(this.responseId || this.chatId, this.model, this.created)
+              for (const chunk of flushToolCallBuffer(this.toolCallState, base, 'qwen-ai')) transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+              const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : delta.finish_reason || 'stop'
               const finalChunk = {
                 id: this.responseId || this.chatId,
                 model: this.model,
@@ -655,7 +593,7 @@ export class QwenAiStreamHandler {
 
     stream.on('data', (buffer: Buffer) => {
       if (transStream.writableEnded || transStream.destroyed) return
-      const text = buffer.toString()
+      const text = decoder.write(buffer)
       console.log('[QwenAI] Raw stream data:', text.substring(0, 500))
       parser.feed(text)
     })
@@ -674,6 +612,7 @@ export class QwenAiStreamHandler {
 
   async handleNonStream(stream: any): Promise<any> {
     return new Promise((resolve, reject) => {
+      const decoder = new StringDecoder('utf8')
       const data = {
         id: '',
         model: this.model,
@@ -768,7 +707,7 @@ export class QwenAiStreamHandler {
         },
       })
 
-      stream.on('data', (buffer: Buffer) => parser.feed(buffer.toString()))
+      stream.on('data', (buffer: Buffer) => parser.feed(decoder.write(buffer)))
       stream.once('error', (err: Error) => {
         console.error('[QwenAI] Non-stream error:', err)
         rejectOnce(err)

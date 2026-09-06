@@ -86,6 +86,10 @@ export const useProvidersStore = create<ProviderState>((set, get) => ({
   removeProvider: (id) => set((state) => ({
     providers: state.providers.filter((p) => p.id !== id),
     accounts: state.accounts.filter((a) => a.providerId !== id),
+    providerStatuses: Object.fromEntries(Object.entries(state.providerStatuses).filter(([key]) => key !== id)),
+    accountCounts: Object.fromEntries(Object.entries(state.accountCounts).filter(([key]) => key !== id)),
+    selectedProviderId: state.selectedProviderId === id ? null : state.selectedProviderId,
+    selectedAccountId: state.accounts.some(account => account.providerId === id && account.id === state.selectedAccountId) ? null : state.selectedAccountId,
   })),
   
   addAccount: (account) => set((state) => ({

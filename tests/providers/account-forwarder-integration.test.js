@@ -52,6 +52,7 @@ function fixture(options = {}) {
     async deleteSession() { throw Error('No delete or network expected') }
   }
   const imports = {
+    '../providers/customApi': require('../../src/main/providers/customApi.ts'),
     axios: { create: () => ({ request() { throw Error('No network expected') } }) },
     '../store/store': { storeManager }, '../store/accounts': { AccountManager }, '../../shared/accountAvailability': availability,
     './adapters/deepseek-restrictions': restrictions, './adapters/deepseek': { DeepSeekAdapter: Adapter }, './adapters/deepseek-stream': deepseekStream,

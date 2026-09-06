@@ -5,6 +5,7 @@
 
 import { storeManager } from './store'
 import { Provider, ProviderType, AuthType, BUILTIN_PROVIDERS } from './types'
+import { CustomProviderManager } from '../providers/custom'
 
 /**
  * Provider Manager Class
@@ -77,55 +78,8 @@ export class ProviderManager {
     type?: ProviderType
     id?: string
   }): Provider {
-    const existing = storeManager.getProviders()
-    
-    // Check if provider with same ID already exists (built-in provider)
-    if (data.id) {
-      const existingById = existing.find(p => p.id === data.id)
-      if (existingById) {
-        return existingById
-      }
-    }
-    
-    // Check if provider with same name already exists
-    const nameExists = existing.some(
-      (p) => p.name.toLowerCase() === data.name.toLowerCase()
-    )
-    
-    if (nameExists) {
-      const existingByName = existing.find(
-        (p) => p.name.toLowerCase() === data.name.toLowerCase()
-      )
-      if (existingByName) {
-        return existingByName
-      }
-    }
-    
-    const now = Date.now()
-    const provider: Provider = {
-      id: data.id || storeManager.generateId(),
-      name: data.name,
-      type: data.type || 'custom',
-      authType: data.authType,
-      apiEndpoint: data.apiEndpoint,
-      chatPath: data.chatPath,
-      headers: data.headers || {},
-      enabled: true,
-      createdAt: now,
-      updatedAt: now,
-      description: data.description,
-      icon: data.icon,
-      supportedModels: data.supportedModels,
-      credentialFields: data.credentialFields,
-    }
-    
-    storeManager.addProvider(provider)
-    
-    storeManager.addLog('info', `Create provider: ${provider.name}`, {
-      providerId: provider.id,
-    })
-    
-    return provider
+    return CustomProviderManager.create(data)
+
   }
 
   /**
@@ -143,6 +97,8 @@ export class ProviderManager {
     if (!existing) {
       throw new Error(`Provider not found: ${id}`)
     }
+
+    if (existing.type === 'custom') return CustomProviderManager.update(id, updates)
     
     if (existing.type === 'builtin') {
       const restricted = ['name', 'authType', 'apiEndpoint']

@@ -212,3 +212,92 @@ test('transport errors never export arbitrary errors or automatically retry a su
   assert.equal(generated, 1)
   assert.doesNotMatch(JSON.stringify(result), /SECRET|fixture-gateway/)
 })
+
+for (const adapter of ['standard-openai-tools', 'cherry-studio-mcp']) test(`custom native API completes the standard two-turn exchange without a website ID (${adapter})`, async () => {
+  const f = fixture({ getProviders: () => [{ id: 'custom-fixture', name: 'Fixture API', enabled: true, type: 'custom' }],
+    getEffectiveModels: () => [{ displayName: 'fixture-native' }] })
+  f.config.toolCallingConfig.clientAdapterId = adapter
+  const request = f.deps.request!
+  f.deps.request = async options => {
+    if (options.path === '/v1/models') return response({ data: [{ id: 'fixture-native', owned_by: 'Fixture API' }] })
+    const body = options.body as any
+    if (body?.messages.at(-1)?.role === 'tool') {
+      f.requests.push(options)
+      assert.deepEqual(body.messages.map((message: any) => message.role), ['user', 'assistant', 'tool'])
+      assert.equal(body.messages[1].tool_calls[0].id, body.messages[2].tool_call_id)
+      assert.equal(options.headers['X-Chat2API-Session-ID'], undefined)
+      return { ...response({ choices: [{ message: { role: 'assistant', content: body.messages[2].content }, finish_reason: 'stop' }] }), headers: {} }
+    }
+    return { ...await request(options), headers: {} }
+  }
+  const result = await probeToolCalling(f.deps)
+  assert.equal(result.success, true)
+  assert.equal(result.providerId, 'custom-fixture')
+  assert.equal(result.checks.length, 2)
+  assert.equal(f.requests.filter(item => item.body).length, 2)
+  assert.doesNotMatch(JSON.stringify(result), /fixture-gateway|private-gateway|Authorization|nonce|CHAT2API_TOOL_OK/)
+})
+
+for (const [code, status, expected] of [
+  ['captcha_required', 403, 'captcha_required'], ['verification_required', 403, 'verification_required'],
+  ['authentication_required', 401, 'authentication_required'], ['action_required', 409, 'action_required'],
+  ['rate_limited', 429, 'rate_limited'], ['model_rate_limited', 429, 'rate_limited'],
+  ['account_temporarily_suspended', 429, 'account_cooling_down'], ['account_cooling_down', 409, 'account_cooling_down'],
+  ['account_banned', 429, 'account_banned'], ['account_daily_limit', 429, 'quota_exceeded'],
+  ['no_available_account', 503, 'account_unavailable'], ['quota_exceeded', 429, 'quota_exceeded'],
+  ['model_not_available', 404, 'model_unavailable'], ['incomplete_stream', 502, 'incomplete_response'],
+] as const) test(`upstream ${code} is blocked, not a tool-parser failure, and keeps only safe recovery metadata`, async () => {
+  const f = fixture()
+  const request = f.deps.request!
+  let generated = 0
+  f.deps.request = async options => {
+    if (!options.body) return request(options)
+    generated++
+    return { ...response({ error: { code, message: `SECRET ${SECRET}` } }, status), headers: { 'retry-after': '60' } }
+  }
+  const before = Date.now()
+  const result = await probeToolCalling(f.deps)
+  assert.equal(result.success, false)
+  assert.equal(result.category, 'provider_or_account_error')
+  assert.equal(result.upstreamCategory, expected)
+  assert.equal(result.failureCode, `first_http_${status}`)
+  assert.ok(result.retryAt! >= before + 60000 && result.retryAt! <= Date.now() + 60000)
+  assert.equal(generated, 1)
+  assert.doesNotMatch(JSON.stringify(result), /SECRET|fixture-gateway/)
+})
+
+test('unknown remote codes/messages and malformed retry headers cannot escape the diagnostic', async () => {
+  for (const retry of ['SECRET', '-1', '99999999999999999', '0', ['60']]) {
+    const f = fixture()
+    const request = f.deps.request!
+    f.deps.request = async options => options.body ? { ...response({ error: { code: '__proto__', message: 'SECRET captcha_required' } }, 500),
+      headers: { 'retry-after': retry } } : request(options)
+    const result = await probeToolCalling(f.deps)
+    assert.equal(result.upstreamCategory, 'upstream_error')
+    assert.equal(result.retryAt, undefined)
+    assert.doesNotMatch(JSON.stringify(result), /SECRET|__proto__/)
+  }
+})
+
+test('second-turn verification failure preserves the successful first tool call', async () => {
+  const f = fixture()
+  const request = f.deps.request!
+  f.deps.request = async options => (options.body as any)?.messages[0]?.role === 'tool'
+    ? response({ error: { code: 'captcha_required', message: 'SECRET' } }, 403) : request(options)
+  const result = await probeToolCalling(f.deps)
+  assert.equal(result.failureCode, 'second_http_403')
+  assert.equal(result.upstreamCategory, 'captcha_required')
+  assert.deepEqual(result.checks.map(check => check.success), [true, false])
+  assert.doesNotMatch(JSON.stringify(result), /SECRET/)
+})
+
+test('persisted cooldown explains a no-model preflight without sending any request', async () => {
+  const until = Date.now() + 3600000
+  const f = fixture({ getActiveAccountCount: () => 0,
+    getAccountScheduling: () => ({ total: 1, available: 0, disabled: 0, coolingDown: 1, nextRecoveryAt: until }) })
+  const result = await probeToolCalling(f.deps, { providerId: 'deepseek' })
+  assert.equal(result.upstreamCategory, 'account_cooling_down')
+  assert.equal(result.retryAt, until)
+  assert.equal(result.failureCode, 'no_available_model')
+  assert.equal(f.requests.length, 0)
+})

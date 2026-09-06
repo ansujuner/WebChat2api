@@ -105,6 +105,8 @@ export interface ChatCompletionRequest {
   tools?: ChatCompletionTool[]
   /** Tool choice strategy */
   tool_choice?: ChatCompletionToolChoice
+  /** Native APIs may disable parallel function calls. */
+  parallel_tool_calls?: boolean
   /** Tool format - determines response format for tool calls */
   tool_format?: 'native' | 'json' | 'auto'
 }

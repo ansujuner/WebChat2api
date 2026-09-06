@@ -12,6 +12,7 @@ import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
 import type { ConversationRequestOptions, ProviderConversationState } from '../conversationTypes'
 import { getProviderToolProfile } from '../toolCalling/providerProfiles'
+import type { ToolCallingPlan } from '../toolCalling/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 import { parseToolCallsFromText } from '../utils/toolParser'
 import { DEFAULT_ZAI_WEB_MODEL, isZaiThinkingRequired, resolveZaiWebModel } from './zai-model-options.ts'
@@ -643,11 +644,11 @@ export class ZaiStreamHandler {
   private citationBuffer: { value: string } = { value: '' }
   private thinkingCitationBuffer: { value: string } = { value: '' }
 
-  constructor(model: string, onEnd?: (chatId: string) => void) {
+  constructor(model: string, onEnd?: (chatId: string) => void, toolCallingPlan?: ToolCallingPlan) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
-    this.toolCallState = createToolCallState()
+    this.toolCallState = createToolCallState(toolCallingPlan)
   }
 
   setChatId(chatId: string) {

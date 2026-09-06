@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2, FlaskConical, Settings2, Wrench, XCircle } from 'lucide-react'
 import {
@@ -18,10 +19,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useProxyStore } from '@/stores/proxyStore'
+import { toolSmokePresentation } from '@/lib/toolSmokePresentation'
+
+type ToolCallingUpdate = Omit<Partial<ToolCallingConfig>, 'advanced'> & { advanced?: Partial<ToolCallingConfig['advanced']> }
 
 function mergeToolCallingConfig(
   config: ToolCallingConfig,
-  updates: Partial<ToolCallingConfig>,
+  updates: ToolCallingUpdate,
 ): ToolCallingConfig {
   return {
     ...config,
@@ -36,9 +40,12 @@ function mergeToolCallingConfig(
 
 export function ToolCallingPanel() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const { appConfig, saveAppConfig } = useProxyStore()
-  const [smokeStatus, setSmokeStatus] = useState<'not_run' | 'running' | 'pass' | 'failed'>('not_run')
+  const [smokeStatus, setSmokeStatus] = useState<'not_run' | 'running' | 'pass' | 'failed' | 'blocked'>('not_run')
   const [smokeMessage, setSmokeMessage] = useState('')
+  const [smokeView, setSmokeView] = useState<ReturnType<typeof toolSmokePresentation> | null>(null)
+  const smokeRunning = useRef(false)
   const [smokeModels, setSmokeModels] = useState<Array<{model:string;providerId:string;providerName:string}>>([])
   const [smokeSelection, setSmokeSelection] = useState('auto')
   const config = appConfig?.toolCallingConfig ?? DEFAULT_TOOL_CALLING_CONFIG
@@ -46,7 +53,7 @@ export function ToolCallingPanel() {
     let active = true
     window.electronAPI?.toolCalling?.getStatus().then(status => {
       if (active) setSmokeModels(status.models ?? [])
-    }).catch(() => { if (active) setSmokeMessage(t('toolCalling.smoke.loadFailed')) })
+    }).catch(() => { if (active) setSmokeMessage('toolCalling.smoke.loadFailed') })
     return () => { active = false }
   }, [t])
   const clientAdapters = P0_TOOL_CLIENT_ADAPTERS.filter(
@@ -58,30 +65,37 @@ export function ToolCallingPanel() {
     [config.clientAdapterId],
   )
 
-  const saveConfig = (updates: Partial<ToolCallingConfig>) => {
+  const saveConfig = (updates: ToolCallingUpdate) => {
     if (!appConfig) return
     saveAppConfig({ toolCallingConfig: mergeToolCallingConfig(config, updates) })
   }
 
   const runSmoke = async () => {
+    if (smokeRunning.current) return
+    smokeRunning.current = true
     setSmokeStatus('running')
     setSmokeMessage('')
+    setSmokeView(null)
     try {
       const selected = smokeModels.find(item => `${item.providerId}/${item.model}` === smokeSelection)
       if (smokeSelection !== 'auto' && !selected) {
-        setSmokeStatus('failed')
-        setSmokeMessage(t('toolCalling.smoke.modelUnavailable'))
+        setSmokeStatus('blocked')
+        setSmokeMessage('toolCalling.smoke.modelUnavailable')
         return
       }
       const result = await window.electronAPI?.toolCalling?.runSmoke?.({
         clientAdapterId: config.clientAdapterId,
         ...(selected ? {model: selected.model, providerId: selected.providerId} : {}),
       })
-      setSmokeStatus(result?.success ? 'pass' : 'failed')
-      setSmokeMessage(result?.message || t('toolCalling.smoke.unavailable'))
+      const view = toolSmokePresentation(result)
+      setSmokeView(view)
+      setSmokeStatus(view.status)
+      setSmokeMessage(view.messageKey)
     } catch {
-      setSmokeStatus('failed')
-      setSmokeMessage(t('toolCalling.smoke.unavailable'))
+      setSmokeStatus('blocked')
+      setSmokeMessage('toolCalling.smoke.unavailable')
+    } finally {
+      smokeRunning.current = false
     }
   }
 
@@ -186,7 +200,15 @@ export function ToolCallingPanel() {
                 {t('toolCalling.smoke.run')}
               </Button>
             </div>
-            {smokeMessage && <p role="status" className="break-words text-xs text-muted-foreground">{smokeMessage}</p>}
+            {smokeMessage && <p role="status" className="break-words text-xs text-muted-foreground">{t(smokeMessage)}</p>}
+            {smokeView?.checks.length ? <ul className="space-y-1 text-xs text-muted-foreground">{smokeView.checks.map((check, index) =>
+              <li key={`${check.stage}-${index}`}>{t(`toolCalling.smoke.stage.${check.stage}`)}：{t(check.success ? 'toolCalling.smoke.pass' : smokeStatus === 'blocked' ? 'toolCalling.smoke.blocked' : 'toolCalling.smoke.failed')}</li>
+            )}</ul> : null}
+            {smokeView?.retryAt && <p className="text-xs text-muted-foreground">{t('toolCalling.smoke.retryAt', { time: new Date(smokeView.retryAt).toLocaleString() })}</p>}
+            {smokeStatus === 'blocked' && <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">{t('toolCalling.smoke.blockedHelp')}</p>
+              <Button size="sm" variant="outline" onClick={() => navigate('/providers')}>{t('toolCalling.smoke.accountAction')}</Button>
+            </div>}
           </div>
         </CardContent>
       </Card>

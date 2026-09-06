@@ -346,9 +346,10 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     error?: string
   }> => {
     try {
-      const result = await ProviderChecker.fetchProviderModels(providerId)
-      
       const provider = ProviderManager.getById(providerId)
+      const result = provider?.type === 'custom'
+        ? await CustomProviderManager.fetchModels(providerId)
+        : await ProviderChecker.fetchProviderModels(providerId)
       if (provider) {
         ProviderManager.update(providerId, {
           supportedModels: result.supportedModels,
@@ -386,6 +387,12 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
 
       if (providerId === 'arena') {
         const catalog = await syncArenaProviderModels()
+        return { success: true, modelsCount: catalog.supportedModels.length }
+      }
+
+      if (provider.type === 'custom') {
+        const catalog = await CustomProviderManager.fetchModels(providerId)
+        ProviderManager.update(providerId, catalog)
         return { success: true, modelsCount: catalog.supportedModels.length }
       }
 

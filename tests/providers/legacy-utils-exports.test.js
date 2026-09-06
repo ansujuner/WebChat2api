@@ -18,6 +18,7 @@ function fixture() {
     const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
     vm.runInNewContext(code, { module, exports: module.exports, console: { log() {}, warn() {}, error() {} },
       require(name) {
+        if (name === 'node:crypto') return { randomUUID: require('node:crypto').randomUUID }
         assert.ok(name.startsWith('.'), 'legacy helper tests cannot import external app dependencies')
         const candidate = path.resolve(path.dirname(file), name)
         assert.ok(candidate.startsWith(path.join(root, 'src/main/proxy') + path.sep))

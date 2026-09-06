@@ -1,4 +1,19 @@
-# v1.5.0 publication checks
+# Publication checks
+
+## v1.6.1 — tools and custom providers (2026-09-06)
+
+- Final local run: **1,255 tests passed, 0 failed, 0 skipped** (optional native-browser discovery enabled); production build succeeded. The isolated production Electron smoke completed **44/44 checks**, including real UI interactions and loopback HTTP exchanges. The four additional website-parser paths passed **37/37** focused checks.
+- Custom-provider checks exercise the production renderer: open the creation form, reject an invalid URL without saving, save a normalized Base URL, open the account dialog, and save its API key in the isolated account store.
+- A loopback HTTP fixture verifies authenticated model discovery, redacted errors, retained model configuration, editing, and deletion. It is not a public AI service or a real account.
+- The real tool-test IPC completes both turns for the standard OpenAI and Cherry Studio adapters. Both OpenAI Chat Completions and Anthropic Messages complete streaming and non-streaming native tool exchanges, retaining structured tools and their corresponding results.
+- The actual tool-test UI button also passes against this fixture. A separate HTTP 403 fixture produces an account-blocked result, safe guidance, and exactly one request rather than a parser-failure claim or an automatic retry.
+- Website stream regression fixtures cover managed tool parsing for Z.ai, Qwen AI, Perplexity, and MiniMax, including split markers, declared-tool boundaries, and incomplete streams. These are parser/protocol checks, not live account certifications.
+
+**Live boundary:** the sampled existing Z.ai account required a captcha before generating a reply; the existing DeepSeek account was cooling down. Code, fixture, and health-check passes must not be presented as successful real tool calls on either blocked account. Complete website verification or wait for recovery before manually testing again.
+
+The original copyright, GPL notices, and account storage identifiers remain unchanged. No account profiles, keys, raw provider messages, or local diagnostic reports are published.
+
+## Historical v1.5.0 publication checks
 
 Checked on Windows on 2026-09-06. This is a source publication, not an installer release or a guarantee of provider availability.
 

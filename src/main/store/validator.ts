@@ -6,6 +6,7 @@
 import axios, { AxiosError } from 'axios'
 import { Provider, ValidationResult, AuthType } from './types'
 import { ProviderChecker } from '../providers/checker'
+import { fetchCustomModels } from '../providers/customApi'
 
 /**
  * Validator interface
@@ -404,17 +405,11 @@ export async function validateCredentials(
     }
   }
   
-  // Custom providers use generic validator
-  const validator = new GenericTokenValidator(provider.apiEndpoint, provider.headers)
-  
   try {
-    return await validator.validate(credentials)
+    await fetchCustomModels(provider, credentials)
+    return { valid: true, validatedAt: Date.now() }
   } catch (error) {
-    return {
-      valid: false,
-      error: `Validation exception: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      validatedAt: Date.now(),
-    }
+    return { valid: false, error: error instanceof Error ? error.message : 'Custom API validation failed', validatedAt: Date.now() }
   }
 }
 

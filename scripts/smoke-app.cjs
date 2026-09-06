@@ -387,6 +387,8 @@ function runChild() {
     assert.equal(tokens.headers['x-chat2api-token-count'], 'estimated')
     check('anthropic-count-tokens-http-200-estimated')
 
+    await require('./smoke-custom-tools.cjs')({ invoke, check, port })
+
     // Fake account in the isolated profile only. Never validate it against a provider.
     const account = await invoke('window.electronAPI.accounts.add({providerId:"deepseek", name:"isolated-scheduling-fixture", credentials:{token:"fixture-not-a-real-token"}})')
     const accountId = JSON.stringify(account.id)

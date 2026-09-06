@@ -1,4 +1,5 @@
 import { PassThrough } from 'stream'
+import { StringDecoder } from 'node:string_decoder'
 import { parseToolCallsFromText } from '../utils/toolParser'
 import { 
   createToolCallState, 
@@ -9,6 +10,7 @@ import {
 } from '../utils/streamToolHandler'
 import type { PerplexityAdapter } from './perplexity'
 import type { ConversationRequestOptions } from '../conversationTypes'
+import type { ToolCallingPlan } from '../toolCalling/types'
 
 function filterCitations(content: string): string {
   // Filter out citation markers like [1], [perplexity+1], [perplexity-1], etc.
@@ -71,18 +73,21 @@ export class PerplexityStreamHandler {
   private accumulatedContent: string = ''
   private accumulatedReasoning: string = ''
   private sources: any[] = []
+  private toolCallingPlan?: ToolCallingPlan
 
   constructor(
     model: string,
     sessionId: string,
     onEnd?: () => void,
-    adapter?: PerplexityAdapter
+    adapter?: PerplexityAdapter,
+    toolCallingPlan?: ToolCallingPlan
   ) {
     this.model = model
     this.sessionId = sessionId
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
-    this.toolCallState = createToolCallState()
+    this.toolCallingPlan = toolCallingPlan
+    this.toolCallState = createToolCallState(toolCallingPlan)
     this.adapter = adapter
   }
 
@@ -161,6 +166,7 @@ export class PerplexityStreamHandler {
   async handleStream(stream: NodeJS.ReadableStream): Promise<NodeJS.ReadableStream> {
     const transStream = new PassThrough()
     let buffer = ''
+    const decoder = new StringDecoder('utf8')
     let doneCalled = false
     transStream.once('close', () => {
       const upstream = stream as PassThrough
@@ -169,7 +175,7 @@ export class PerplexityStreamHandler {
 
     stream.on('data', (chunk: Buffer) => {
       if (doneCalled) return
-      const chunkStr = chunk.toString()
+      const chunkStr = decoder.write(chunk)
       buffer += chunkStr
       const lines = buffer.split('\n')
       buffer = lines.pop() || ''
@@ -321,7 +327,8 @@ export class PerplexityStreamHandler {
     this.accumulatedContent += content
 
     // Filter out citation markers from the content
-    const filteredContent = filterCitations(content)
+    // Citation-looking JSON such as [1] inside a tool argument is literal data.
+    const filteredContent = this.toolCallingPlan?.tools.length ? content : filterCitations(content)
     if (!filteredContent) return
 
     const baseChunk = createBaseChunk(this.sessionId, this.model, this.created)
@@ -388,10 +395,11 @@ export class PerplexityStreamHandler {
   async handleNonStream(stream: NodeJS.ReadableStream): Promise<any> {
     return new Promise((resolve, reject) => {
       let buffer = ''
+      const decoder = new StringDecoder('utf8')
       let completed = false
 
       stream.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString()
+        buffer += decoder.write(chunk)
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
 
@@ -428,8 +436,10 @@ export class PerplexityStreamHandler {
           return
         }
         // Filter citations from accumulated content
-        const filteredAccumulatedContent = filterCitations(this.accumulatedContent)
-        const { content: cleanContent, toolCalls } = parseToolCallsFromText(filteredAccumulatedContent)
+        const filteredAccumulatedContent = this.toolCallingPlan?.tools.length ? this.accumulatedContent : filterCitations(this.accumulatedContent)
+        // The forwarder applies the declared schema once, after collection.
+        const { content: cleanContent, toolCalls } = this.toolCallingPlan
+          ? { content: filteredAccumulatedContent, toolCalls: [] } : parseToolCallsFromText(filteredAccumulatedContent)
 
         const message: any = {
           role: 'assistant',

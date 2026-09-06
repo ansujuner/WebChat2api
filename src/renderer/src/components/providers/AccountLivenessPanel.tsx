@@ -55,7 +55,7 @@ export function AccountLivenessPanel({ controller }: { controller: AccountLivene
               <p className="text-xs text-muted-foreground break-all">
                 {t('accountLiveness.model')}: {result.model || '—'} · {t('accountLiveness.latency')}: {typeof result.latencyMs === 'number' ? `${Math.round(result.latencyMs)} ms` : '—'} · {time(result.finishedAt || result.startedAt)}
               </p>
-              {result.reason && <p className="text-xs mt-1">{t(`accountLiveness.reasons.${Object.hasOwn(reasonKeys, result.reason) ? reasonKeys[result.reason] : 'internal_error'}`)}</p>}
+              {result.reason && <p className="text-xs mt-1">{t(`accountLiveness.reasons.${Object.prototype.hasOwnProperty.call(reasonKeys, result.reason) ? reasonKeys[result.reason] : 'internal_error'}`)}</p>}
               {result.retryAt && <p className="text-xs text-muted-foreground">{t('accountLiveness.retryAt', { time: time(result.retryAt) })}</p>}
             </li>)}
           </ul>

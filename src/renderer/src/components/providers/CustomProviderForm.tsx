@@ -1,365 +1,173 @@
-/**
- * Custom Provider Form Component
- * Create and edit custom API providers
- */
-
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Plus, X, HelpCircle } from 'lucide-react'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import type { AuthType, CredentialField } from '@/types/electron'
+import { Switch } from '@/components/ui/switch'
+import { Download, Loader2, Plus, X } from 'lucide-react'
+import type { CustomProviderFormData } from '@/types/electron'
+export type { CustomProviderFormData } from '@/types/electron'
 
 interface CustomProviderFormProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (data: CustomProviderFormData) => void
+  onSubmit: (data: CustomProviderFormData) => Promise<void>
   initialData?: Partial<CustomProviderFormData>
+  providerId?: string
+  onFetchModels?: () => Promise<string[]>
 }
 
-export interface CustomProviderFormData {
-  name: string
-  authType: AuthType
-  apiEndpoint: string
-  headers: Record<string, string>
-  description: string
-  supportedModels: string[]
-  credentialFields: CredentialField[]
-}
+const secretHeader = (key: string) => /authorization|cookie|api[-_]?key|token|secret|password/i.test(key)
+const initialForm = (data?: Partial<CustomProviderFormData>): CustomProviderFormData => ({
+  name: data?.name || '', authType: 'token', apiEndpoint: data?.apiEndpoint || '',
+  headers: { ...(data?.headers || { 'Content-Type': 'application/json' }) }, description: data?.description || '',
+  supportedModels: [...(data?.supportedModels || [])],
+  credentialFields: [{ name: 'apiKey', label: 'API Key', type: 'password', required: data?.credentialFields?.find(field => field.name === 'apiKey')?.required !== false }],
+})
 
-export function CustomProviderForm({
-  open,
-  onOpenChange,
-  onSubmit,
-  initialData,
-}: CustomProviderFormProps) {
+export function CustomProviderForm({ open, onOpenChange, onSubmit, initialData, providerId, onFetchModels }: CustomProviderFormProps) {
   const { t } = useTranslation()
-  
-  const authTypeOptions: { value: AuthType; labelKey: string; descKey: string }[] = [
-    { value: 'token', labelKey: 'providers.authToken', descKey: 'providers.authTokenDesc' },
-    { value: 'userToken', labelKey: 'providers.authUserToken', descKey: 'providers.authUserTokenDesc' },
-    { value: 'refresh_token', labelKey: 'providers.authRefreshToken', descKey: 'providers.authRefreshTokenDesc' },
-    { value: 'jwt', labelKey: 'providers.authJwt', descKey: 'providers.authJwtDesc' },
-    { value: 'realUserID_token', labelKey: 'providers.authUserIdToken', descKey: 'providers.authUserIdTokenDesc' },
-    { value: 'tongyi_sso_ticket', labelKey: 'providers.authSso', descKey: 'providers.authSsoDesc' },
-    { value: 'cookie', labelKey: 'providers.authCookie', descKey: 'providers.authCookieDesc' },
-    { value: 'oauth', labelKey: 'providers.authOAuth', descKey: 'providers.authOAuthDesc' },
-  ]
-
-  const defaultCredentialFields: Record<AuthType, CredentialField[]> = {
-    token: [{ name: 'apiKey', label: 'API Key', type: 'password', required: true }],
-    userToken: [{ name: 'token', label: t('deepseek.userToken'), type: 'password', required: true }],
-    refresh_token: [{ name: 'refresh_token', label: t('glm.refreshToken'), type: 'password', required: true }],
-    jwt: [{ name: 'token', label: 'JWT Token', type: 'password', required: true }],
-    realUserID_token: [
-      { name: 'realUserID', label: t('minimax.userId'), type: 'text', required: true },
-      { name: 'token', label: t('minimax.jwtToken'), type: 'password', required: true },
-    ],
-    tongyi_sso_ticket: [{ name: 'ticket', label: t('qwen.ssoTicket'), type: 'password', required: true }],
-    cookie: [{ name: 'cookie', label: 'Cookie', type: 'textarea', required: true }],
-    oauth: [],
-  }
-
-  const [formData, setFormData] = useState<CustomProviderFormData>({
-    name: initialData?.name || '',
-    authType: initialData?.authType || 'token',
-    apiEndpoint: initialData?.apiEndpoint || '',
-    headers: initialData?.headers || { 'Content-Type': 'application/json' },
-    description: initialData?.description || '',
-    supportedModels: initialData?.supportedModels || [],
-    credentialFields: initialData?.credentialFields || defaultCredentialFields['token'],
-  })
-
-  const [newModel, setNewModel] = useState('')
+  const [formData, setFormData] = useState(() => initialForm(initialData))
+  const [modelsText, setModelsText] = useState((initialData?.supportedModels || []).join('\n'))
   const [newHeaderKey, setNewHeaderKey] = useState('')
   const [newHeaderValue, setNewHeaderValue] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState<'save' | 'models' | null>(null)
+  const [notice, setNotice] = useState('')
+  const operation = useRef(false)
+  const revision = useRef(0)
 
-  const handleAuthTypeChange = (authType: AuthType) => {
-    setFormData({
-      ...formData,
-      authType,
-      credentialFields: defaultCredentialFields[authType],
-    })
-  }
-
-  const handleAddModel = () => {
-    if (newModel.trim() && !formData.supportedModels.includes(newModel.trim())) {
-      setFormData({
-        ...formData,
-        supportedModels: [...formData.supportedModels, newModel.trim()],
-      })
-      setNewModel('')
+  useEffect(() => {
+    revision.current += 1
+    if (open) {
+      setFormData(initialForm(initialData)); setModelsText((initialData?.supportedModels || []).join('\n'))
+      setNewHeaderKey(''); setNewHeaderValue(''); setErrors({}); setNotice(''); setBusy(null); operation.current = false
     }
-  }
-
-  const handleRemoveModel = (model: string) => {
-    setFormData({
-      ...formData,
-      supportedModels: formData.supportedModels.filter((m) => m !== model),
-    })
-  }
+    return () => { revision.current += 1 }
+  }, [open, providerId])
 
   const handleAddHeader = () => {
-    if (newHeaderKey.trim() && newHeaderValue.trim()) {
-      setFormData({
-        ...formData,
-        headers: {
-          ...formData.headers,
-          [newHeaderKey.trim()]: newHeaderValue.trim(),
-        },
-      })
-      setNewHeaderKey('')
-      setNewHeaderValue('')
+    const key = newHeaderKey.trim(), value = newHeaderValue.trim()
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key) || !value || /[\r\n]/.test(value) || secretHeader(key)) {
+      setErrors(previous => ({ ...previous, headers: t('customProvider.headerInvalid') })); return
+    }
+    setFormData(previous => ({ ...previous, headers: { ...previous.headers, [key]: value } }))
+    setNewHeaderKey(''); setNewHeaderValue(''); setErrors(previous => ({ ...previous, headers: '' }))
+  }
+
+  const handleSubmit = async () => {
+    if (operation.current) return
+    const nextErrors: Record<string, string> = {}
+    if (!formData.name.trim()) nextErrors.name = t('providers.providerNameRequired')
+    try {
+      const url = new URL(formData.apiEndpoint.trim())
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error()
+    } catch { nextErrors.apiEndpoint = t('customProvider.urlInvalid') }
+    const models = [...new Set(modelsText.split(/[\n,]/).map(value => value.trim()).filter(Boolean))]
+    if (models.length > 10000 || models.some(model => model.length > 256 || /[\x00-\x1f\x7f]/.test(model))) nextErrors.models = t('customProvider.modelsInvalid')
+    if (Object.entries(formData.headers).some(([key, value]) => secretHeader(key) || /[\r\n]/.test(value))) nextErrors.headers = t('customProvider.headerInvalid')
+    setErrors(nextErrors)
+    if (Object.keys(nextErrors).length) return
+    operation.current = true; setBusy('save')
+    const current = revision.current
+    try {
+      await onSubmit({ ...formData, name: formData.name.trim(), apiEndpoint: formData.apiEndpoint.trim(), supportedModels: models })
+      if (current === revision.current) onOpenChange(false)
+    } catch {
+      if (current === revision.current) setErrors(previous => ({ ...previous, submit: t('customProvider.saveFailed') }))
+    } finally {
+      if (current === revision.current) { operation.current = false; setBusy(null) }
     }
   }
 
-  const handleRemoveHeader = (key: string) => {
-    const { [key]: _, ...rest } = formData.headers
-    setFormData({ ...formData, headers: rest })
-  }
-
-  const validate = (): boolean => {
-    const newErrors: Record<string, string> = {}
-
-    if (!formData.name.trim()) {
-      newErrors.name = t('providers.providerNameRequired')
-    }
-
-    if (!formData.apiEndpoint.trim()) {
-      newErrors.apiEndpoint = t('providers.apiEndpointRequired')
-    } else {
-      try {
-        new URL(formData.apiEndpoint)
-      } catch {
-        newErrors.apiEndpoint = t('providers.apiEndpointInvalid')
+  const handleFetchModels = async () => {
+    if (!onFetchModels || operation.current || formData.apiEndpoint.trim() !== initialData?.apiEndpoint?.trim()) return
+    operation.current = true; setBusy('models'); setNotice('')
+    const current = revision.current
+    try {
+      const models = await onFetchModels()
+      if (current === revision.current) {
+        // Fetching adds IDs without discarding manually entered models.
+        setModelsText(previous => [...new Set([...previous.split(/[\n,]/).map(value => value.trim()).filter(Boolean), ...models])].join('\n'))
+        setNotice(t('customProvider.modelsFetched', { count: models.length }))
       }
-    }
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
-  }
-
-  const handleSubmit = () => {
-    if (validate()) {
-      onSubmit(formData)
-      onOpenChange(false)
+    } catch {
+      if (current === revision.current) setNotice(t('customProvider.fetchFailed'))
+    } finally {
+      if (current === revision.current) { operation.current = false; setBusy(null) }
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px]">
-        <DialogHeader>
-          <DialogTitle>
-            {initialData ? t('providers.editProvider') : t('providers.createCustomProvider')}
-          </DialogTitle>
-          <DialogDescription>
-            {t('providers.createCustomProviderDesc')}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="h-[500px] overflow-y-auto pr-2">
-          <div className="space-y-6 py-4 px-1">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">
-                  {t('providers.providerName')} <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g., My API Provider"
-                />
-                {errors.name && (
-                  <p className="text-xs text-destructive">{errors.name}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="authType">
-                  {t('providers.authType')} <span className="text-destructive">*</span>
-                </Label>
-                <Select value={formData.authType} onValueChange={handleAuthTypeChange}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {authTypeOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        <div className="flex flex-col">
-                          <span>{t(option.labelKey)}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {t(option.descKey)}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="apiEndpoint">
-                  {t('providers.apiEndpoint')} <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="apiEndpoint"
-                  value={formData.apiEndpoint}
-                  onChange={(e) => setFormData({ ...formData, apiEndpoint: e.target.value })}
-                  placeholder="https://api.example.com/v1"
-                />
-                {errors.apiEndpoint && (
-                  <p className="text-xs text-destructive">{errors.apiEndpoint}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="description">{t('providers.description')}</Label>
-                <Textarea
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder={t('providers.descriptionPlaceholder')}
-                  rows={2}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label>{t('providers.supportedModels')}</Label>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <HelpCircle className="h-4 w-4 text-muted-foreground" />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{t('providers.supportedModelsHelp')}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  value={newModel}
-                  onChange={(e) => setNewModel(e.target.value)}
-                  placeholder={t('providers.modelNamePlaceholder')}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddModel()}
-                />
-                <Button type="button" variant="outline" onClick={handleAddModel}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {formData.supportedModels.map((model) => (
-                  <Badge key={model} variant="secondary" className="gap-1">
-                    {model}
-                    <X
-                      className="h-3 w-3 cursor-pointer"
-                      onClick={() => handleRemoveModel(model)}
-                    />
-                  </Badge>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <Label>{t('providers.headersConfig')}</Label>
-              <div className="grid grid-cols-[1fr,1fr,auto] gap-2">
-                <Input
-                  value={newHeaderKey}
-                  onChange={(e) => setNewHeaderKey(e.target.value)}
-                  placeholder={t('providers.headerName')}
-                />
-                <Input
-                  value={newHeaderValue}
-                  onChange={(e) => setNewHeaderValue(e.target.value)}
-                  placeholder={t('providers.headerValue')}
-                />
-                <Button type="button" variant="outline" onClick={handleAddHeader}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {Object.entries(formData.headers).map(([key, value]) => (
-                  <div key={key} className="flex items-center justify-between p-2 rounded bg-muted">
-                    <div className="text-sm">
-                      <span className="font-medium">{key}:</span> {value}
-                    </div>
-                    <X
-                      className="h-4 w-4 cursor-pointer text-muted-foreground hover:text-foreground"
-                      onClick={() => handleRemoveHeader(key)}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label>{t('providers.credentialFields')}</Label>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <HelpCircle className="h-4 w-4 text-muted-foreground" />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{t('providers.credentialFieldsHelp')}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <div className="space-y-2 p-3 rounded bg-muted/50">
-                {formData.credentialFields.map((field) => (
-                  <div key={field.name} className="flex items-center gap-2 text-sm">
-                    <Badge variant="outline">{field.name}</Badge>
-                    <span className="text-muted-foreground">{field.label}</span>
-                    <span className="text-muted-foreground">({field.type})</span>
-                    {field.required && <Badge variant="secondary">{t('providers.required')}</Badge>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+  return <Dialog open={open} onOpenChange={value => { if (!operation.current) onOpenChange(value) }}>
+    <DialogContent className="sm:max-w-[680px]">
+      <DialogHeader>
+        <DialogTitle>{providerId ? t('providers.editProvider') : t('providers.createCustomProvider')}</DialogTitle>
+        <DialogDescription>{t('customProvider.description')}</DialogDescription>
+      </DialogHeader>
+      <div className="max-h-[65vh] space-y-5 overflow-y-auto px-1 py-2">
+        <div className="rounded-lg border bg-muted/40 p-3 text-xs leading-6 text-muted-foreground">
+          <Badge variant="secondary">OpenAI-compatible</Badge>
+          <p className="mt-1">{t('customProvider.accountHelp')}</p>
         </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button onClick={handleSubmit}>
-            {initialData ? t('providers.saveChanges') : t('providers.createCustomProvider')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
+        <div className="space-y-2">
+          <Label htmlFor="custom-provider-name">{t('providers.providerName')} *</Label>
+          <Input id="custom-provider-name" maxLength={50} value={formData.name} disabled={!!busy} onChange={event => setFormData(previous => ({ ...previous, name: event.target.value }))} placeholder={t('customProvider.namePlaceholder')} />
+          {errors.name && <p role="alert" className="text-xs text-destructive">{errors.name}</p>}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="custom-provider-url">Base URL *</Label>
+          <Input id="custom-provider-url" maxLength={2048} value={formData.apiEndpoint} disabled={!!busy} onChange={event => setFormData(previous => ({ ...previous, apiEndpoint: event.target.value }))} placeholder="https://api.example.com/v1" autoComplete="off" />
+          <p className="text-xs leading-5 text-muted-foreground">{t('customProvider.baseUrlHelp')}</p>
+          {errors.apiEndpoint && <p role="alert" className="text-xs text-destructive">{errors.apiEndpoint}</p>}
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-4">
+            <Label htmlFor="custom-provider-no-auth">{t('customProvider.noAuth')}</Label>
+            <Switch id="custom-provider-no-auth" checked={formData.credentialFields[0].required === false} disabled={!!busy}
+              onCheckedChange={checked => setFormData(previous => ({ ...previous, credentialFields: previous.credentialFields.map(field => ({ ...field, required: !checked })) }))} />
+          </div>
+          <p className="text-xs text-muted-foreground">{t('customProvider.noAuthHelp')}</p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="custom-provider-models">{t('providers.supportedModels')}</Label>
+          <Textarea id="custom-provider-models" value={modelsText} disabled={!!busy} onChange={event => setModelsText(event.target.value)} rows={4} placeholder={t('customProvider.modelsPlaceholder')} />
+          <p className="text-xs leading-5 text-muted-foreground">{t('customProvider.modelsHelp')}</p>
+          {errors.models && <p role="alert" className="text-xs text-destructive">{errors.models}</p>}
+          {providerId && <Button type="button" variant="outline" size="sm" onClick={handleFetchModels} disabled={!!busy || !onFetchModels || formData.apiEndpoint.trim() !== initialData?.apiEndpoint?.trim()}>
+            {busy === 'models' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}{t('customProvider.fetchModels')}
+          </Button>}
+          {providerId && <p className="text-xs text-muted-foreground">{t('customProvider.fetchHelp')}</p>}
+          {notice && <p role="status" className="text-xs text-muted-foreground">{notice}</p>}
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="custom-provider-description">{t('providers.description')}</Label>
+          <Textarea id="custom-provider-description" maxLength={1000} value={formData.description} disabled={!!busy} onChange={event => setFormData(previous => ({ ...previous, description: event.target.value }))} rows={2} />
+        </div>
+        <details className="rounded-lg border p-3">
+          <summary className="cursor-pointer text-sm font-medium">{t('customProvider.advancedHeaders')}</summary>
+          <p className="mt-2 text-xs text-muted-foreground">{t('customProvider.headerHelp')}</p>
+          <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
+            <Input aria-label={t('providers.headerName')} value={newHeaderKey} disabled={!!busy} onChange={event => setNewHeaderKey(event.target.value)} placeholder={t('providers.headerName')} />
+            <Input aria-label={t('providers.headerValue')} value={newHeaderValue} disabled={!!busy} onChange={event => setNewHeaderValue(event.target.value)} placeholder={t('providers.headerValue')} />
+            <Button type="button" variant="outline" disabled={!!busy} onClick={handleAddHeader} aria-label={t('customProvider.addHeader')}><Plus className="h-4 w-4" /></Button>
+          </div>
+          <div className="mt-3 space-y-2">{Object.entries(formData.headers).map(([key, value]) => <div key={key} className="flex items-start justify-between gap-2 rounded bg-muted p-2 text-xs">
+            <span className="break-all"><strong>{key}:</strong> {secretHeader(key) ? '••••••••' : value}</span>
+            <button type="button" disabled={!!busy} aria-label={t('customProvider.removeHeader', { name: key })} className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setFormData(previous => ({ ...previous, headers: Object.fromEntries(Object.entries(previous.headers).filter(([name]) => name !== key)) }))}><X className="h-4 w-4" /></button>
+          </div>)}</div>
+          {errors.headers && <p role="alert" className="mt-2 text-xs text-destructive">{errors.headers}</p>}
+        </details>
+        {errors.submit && <p role="alert" className="text-sm text-destructive">{errors.submit}</p>}
+      </div>
+      <DialogFooter>
+        <Button variant="outline" disabled={!!busy} onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
+        <Button disabled={!!busy} onClick={handleSubmit}>{busy === 'save' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{providerId ? t('providers.saveChanges') : t('customProvider.createAndAddKey')}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 }
 
 export default CustomProviderForm

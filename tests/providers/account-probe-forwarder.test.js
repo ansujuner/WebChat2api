@@ -32,7 +32,7 @@ const { ZaiUpstreamError } = errorModule.exports
 function fixture(providerId = 'deepseek', options = {}) {
   let account = { id: 'fixture-account', providerId, enabled: false, status: 'expired',
     credentials: { token: 'fixture-not-a-real-credential' }, ...options.account }
-  let provider = { id: providerId, enabled: false, apiEndpoint: 'https://fixture.invalid', headers: {} }
+  let provider = { id: providerId, enabled: false, apiEndpoint: 'https://fixture.invalid', headers: {}, ...options.provider }
   const captured = [], changes = [], parsers = [], observed = []
   const storeManager = {
     // Mirror the real store: credential material is decrypted only with the explicit flag.
@@ -43,6 +43,7 @@ function fixture(providerId = 'deepseek', options = {}) {
   }
   class AxiosError extends Error {}
   const imports = {
+    '../providers/customApi': require('../../src/main/providers/customApi.ts'),
     axios: { create: () => ({ request: async config => { captured.push({ config }); return options.custom ? options.custom(config) : { status: 200, headers: {}, data: answer() } } }), AxiosError },
     '../store/store': { storeManager },
     '../store/accounts': { AccountManager: {
@@ -341,13 +342,124 @@ test('Z.ai error prose/duck-typed categories do not forge probe classifications 
     assert.equal(f.captured.length, 1)
   }
 })
-test('ordinary Z.ai forwarding preserves its pre-existing typed error message contract', async () => {
-  const parseError = new ZaiUpstreamError('captcha_required')
+for (const [category, status, accountCode] of zaiCategories) test(`ordinary Z.ai ${category} retains safe HTTP/code rather than becoming a generic 500`, async () => {
+  const parseError = new ZaiUpstreamError(category, 401)
+  parseError.message = 'fixture-private-provider-message'
   const f = fixture('zai', { parseError, allowToolEngine: true, account: { enabled: true, status: 'active' } })
   const result = await f.forwarder.forwardZai({ model: 'model', stream: false, messages: [{ role: 'user', content: 'fixture' }] },
     f.account(), f.provider(), 'model', Date.now())
   assert.equal(result.success, false)
-  assert.equal(result.status, undefined)
-  assert.equal(result.errorCode, undefined)
-  assert.equal(result.error, parseError.message)
+  const code = ['captcha_required', 'verification_required', 'access_denied', 'quota_exceeded'].includes(category) ? category : accountCode
+  assert.equal(result.status, status)
+  assert.equal(result.errorCode, code)
+  assert.equal(result.error, `Z.ai upstream ${code}`)
+  assert.doesNotMatch(JSON.stringify(result), /fixture-private|upstreamCode/)
+})
+
+const nativeTools = [{ type: 'function', function: { name: 'fixture_echo', parameters: { type: 'object', properties: { value: { type: 'string' } } } } }]
+for (const stream of [false, true]) test(`custom native tools reach the wire unchanged (${stream ? 'streaming' : 'nonstreaming'})`, async () => {
+  const f = fixture('custom', { account: { enabled: true, status: 'active' }, provider: { type: 'custom' } })
+  const request = { model: 'display-model', messages: [{ role: 'user', content: 'Call fixture_echo' }], tools: nativeTools,
+    tool_choice: { type: 'function', function: { name: 'fixture_echo' } }, parallel_tool_calls: false, stream }
+  const original = JSON.stringify(request)
+  const result = await f.forwarder.forwardChatCompletion(request, f.account(), f.provider(), 'actual-model', {})
+  assert.equal(result.success, true)
+  assert.equal(f.captured.length, 1)
+  assert.deepEqual(plain(f.captured[0].config.data), { ...request, model: 'actual-model' })
+  assert.equal(JSON.stringify(request), original)
+  assert.doesNotMatch(JSON.stringify(f.captured[0].config.data), /CHAT2API|Available Tools/)
+})
+
+test('a custom API is never treated as a website even if a built-in matcher accepts its ID/domain', async () => {
+  const f = fixture('deepseek', { account: { enabled: true, status: 'active' }, provider: { type: 'custom' } })
+  assert.equal(f.forwarder.supportsConversation(f.provider()), false)
+  assert.equal(f.forwarder.conversationKind(f.provider()), undefined)
+  const result = await f.forwarder.forwardChatCompletion({ model: 'fixture', tools: nativeTools, messages: [{ role: 'user', content: 'fixture' }] },
+    f.account(), f.provider(), 'fixture', {})
+  assert.equal(result.success, true)
+  assert.ok(f.captured[0].config, 'generic Axios path rather than website adapter')
+  assert.equal(f.captured[0].id, undefined)
+})
+
+test('native tool failures never retry uncertain submissions and preserve status', async () => {
+  const f = fixture('custom', { account: { enabled: true, status: 'active' }, provider: { type: 'custom' },
+    custom: async () => ({ status: 429, headers: {}, data: { error: { message: 'fixture rate limit' } } }) })
+  const result = await f.forwarder.forwardChatCompletion({ model: 'fixture', messages: [{ role: 'user', content: 'fixture' }], tools: nativeTools },
+    f.account(), f.provider(), 'fixture', {})
+  assert.equal(result.status, 429)
+  assert.equal(f.captured.length, 1)
+})
+
+test('native tool-result history and call IDs remain intact with context management enabled', async () => {
+  const f = fixture('custom', { account: { enabled: true, status: 'active' }, provider: { type: 'custom' } })
+  const messages = [{ role: 'user', content: 'fixture' }, { role: 'assistant', content: null,
+    tool_calls: [{ id: 'fixture-call', type: 'function', function: { name: 'fixture_echo', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'fixture-call', content: 'OK' }]
+  const result = await f.forwarder.forwardChatCompletion({ model: 'fixture', messages }, f.account(), f.provider(), 'fixture', {})
+  assert.equal(result.success, true)
+  assert.equal(f.captured.length, 1)
+  assert.deepEqual(plain(f.captured[0].config.data.messages), messages)
+})
+
+for (const [status, code] of [[401, 'authentication_required'], [403, 'access_denied'], [404, 'model_unavailable'],
+  [429, 'rate_limited'], [500, 'upstream_error'], [302, 'upstream_error']]) test(`custom HTTP ${status} exposes only safe status/retry metadata and closes unread streams`, async () => {
+  for (const stream of [false, true]) {
+    const raw = stream ? new PassThrough() : { error: { message: 'fixture-private-api-key-echo' } }
+    const f = fixture('custom', { account: { enabled: true, status: 'active' }, provider: { type: 'custom' },
+      custom: async () => ({ status, headers: { 'retry-after': '60', 'set-cookie': 'fixture-private-cookie' }, data: raw }) })
+    const result = await f.forwarder.forwardChatCompletion({ model: 'fixture', messages: [{ role: 'user', content: 'fixture' }], tools: nativeTools, stream },
+      f.account(), f.provider(), 'fixture', {})
+    assert.equal(result.success, false)
+    assert.equal(result.status, status === 302 ? 502 : status)
+    assert.equal(result.errorCode, code)
+    assert.deepEqual(plain(result.headers), { 'retry-after': '60' })
+    assert.equal(f.captured[0].config.maxRedirects, 0)
+    assert.doesNotMatch(JSON.stringify(result), /fixture-private/)
+    assert.equal(f.captured.length, 1)
+    if (stream) assert.equal(raw.destroyed, true)
+  }
+})
+
+test('custom transport exceptions and forged retry headers never export API keys', async () => {
+  for (const throwError of [true, false]) {
+    const f = fixture('custom', { account: { enabled: true, status: 'active' }, provider: { type: 'custom' }, custom: async () => {
+      if (throwError) throw new Error('fixture-private-api-key')
+      return { status: 500, headers: { 'retry-after': 'fixture-private-api-key' }, data: 'fixture-private-api-key' }
+    } })
+    const result = await f.forwarder.forwardChatCompletion({ model: 'fixture', messages: [{ role: 'user', content: 'fixture' }], tools: nativeTools },
+      f.account(), f.provider(), 'fixture', {})
+    assert.equal(result.errorCode, 'upstream_error')
+    assert.equal(result.headers, undefined)
+    assert.doesNotMatch(JSON.stringify(result), /fixture-private/)
+    assert.equal(f.captured.length, 1)
+  }
+})
+
+test('custom chat uses the same normalized URL and newest API key as model lookup', async () => {
+  const f = fixture('custom', { provider: { type: 'custom', apiEndpoint: ' https://fixture.invalid/v1/chat/completions ' },
+    account: { enabled: true, status: 'active', credentials: { apiKey: ' fixture-new-key ', token: 'fixture-old-key' } } })
+  const result = await f.forwarder.forwardChatCompletion({ model: 'fixture', messages: [{ role: 'user', content: 'fixture' }], tools: nativeTools },
+    f.account(), f.provider(), 'fixture', {})
+  assert.equal(result.success, true)
+  assert.equal(f.captured[0].config.url, 'https://fixture.invalid/v1/chat/completions')
+  assert.equal(f.captured[0].config.headers.Authorization, 'Bearer fixture-new-key')
+  assert.equal(f.captured[0].config.headers['Content-Type'], 'application/json')
+  assert.equal(f.captured[0].config.headers.Accept, 'application/json')
+})
+
+test('custom no-key APIs omit Authorization while invalid headers/credentials never submit', async () => {
+  for (const [label, provider, credentials, expected] of [
+    ['no key service', { credentialFields: [{ name: 'apiKey', required: false }] }, {}, true],
+    ['required missing key', {}, {}, false],
+    ['newline credential', {}, { apiKey: 'fixture\r\nforged' }, false],
+    ['duplicate lowercase authorization', { headers: { authorization: 'fixture-untrusted' } }, { apiKey: 'fixture-key' }, false],
+  ]) {
+    const f = fixture('custom', { provider: { type: 'custom', ...provider }, account: { enabled: true, status: 'active', credentials } })
+    const result = await f.forwarder.forwardChatCompletion({ model: 'fixture', messages: [{ role: 'user', content: 'fixture' }], tools: nativeTools },
+      f.account(), f.provider(), 'fixture', {})
+    assert.equal(result.success, expected, label)
+    assert.equal(f.captured.length, expected ? 1 : 0, label)
+    if (expected) assert.equal(f.captured[0].config.headers.Authorization, undefined)
+    assert.doesNotMatch(JSON.stringify(result), /fixture-key|fixture-untrusted|forged/)
+  }
 })

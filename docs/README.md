@@ -16,6 +16,7 @@ Choose a guide by task. Most detailed guides are currently in Chinese; English t
 | [账号调度 · Account scheduling](account-scheduling.md) | 手动开关、自动冷却、封禁与模型限额 / Manual switches, cooldowns, restrictions, and model limits |
 | [网络与登录 · Network and login](network-login-update.md) | 系统代理、隔离登录、浏览器兼容性与限制 / System proxy, isolated login, browser compatibility, and limits |
 | [会话续聊 · Conversation continuity](providers/conversation-continuity.md) | 首轮初始化、增量输入、身份绑定和失败处理 / First-turn initialization, deltas, identity binding, and failure handling |
+| [自定义供应商 · Custom providers](providers/custom.md) | Base URL、API Key、获取模型和原生工具 / Base URL, API-key accounts, model discovery, and native tools |
 
 ## 供应商 · Providers
 

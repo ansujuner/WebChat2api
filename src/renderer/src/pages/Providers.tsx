@@ -26,12 +26,13 @@ import type {
 } from '@/types/electron'
 import { FilterType, StatusFilter } from '@/components/providers/ProviderFilter'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Server, ArrowLeft } from 'lucide-react'
+import { Server, ArrowLeft, Plus, Download } from 'lucide-react'
 import { validatedAccountIdentity } from '../../../shared/accountIdentity'
 import { accountAvailability } from '../../../shared/accountAvailability'
 import { useAccountLiveness } from '@/hooks/useAccountLiveness'
 import { AccountLivenessPanel } from '@/components/providers/AccountLivenessPanel'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 type ViewMode = 'providers' | 'accounts' | 'account-detail'
 
@@ -61,6 +62,11 @@ export function Providers() {
   const [showAddProviderDialog, setShowAddProviderDialog] = useState(false)
   const [showCustomProviderForm, setShowCustomProviderForm] = useState(false)
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null)
+  const [deletingProvider, setDeletingProvider] = useState<Provider | null>(null)
+  const [isDeletingProvider, setIsDeletingProvider] = useState(false)
+  const deletingProviderRef = useRef(false)
+  const [updatingModelProvider, setUpdatingModelProvider] = useState<string | null>(null)
+  const modelUpdateRef = useRef(false)
   
   const [showAddAccountDialog, setShowAddAccountDialog] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
@@ -181,10 +187,15 @@ export function Providers() {
   }
 
   const handleDeleteProvider = async (id: string) => {
+    if (deletingProviderRef.current) return
+    deletingProviderRef.current = true
+    setIsDeletingProvider(true)
     try {
       const success = await window.electronAPI.providers.delete(id)
+      if (!success) throw new Error('Provider deletion failed')
       if (success) {
         store.removeProvider(id)
+        setDeletingProvider(null)
         toast({
           title: t('providers.deleteSuccess'),
           description: t('providers.providerDeleted'),
@@ -193,9 +204,12 @@ export function Providers() {
     } catch (error) {
       toast({
         title: t('providers.deleteFailed'),
-        description: error instanceof Error ? error.message : t('providers.cannotDeleteProvider'),
+        description: t('providers.cannotDeleteProvider'),
         variant: 'destructive',
       })
+    } finally {
+      deletingProviderRef.current = false
+      setIsDeletingProvider(false)
     }
   }
 
@@ -258,6 +272,23 @@ export function Providers() {
     }
   }
 
+  const fetchProviderModels = async (providerId: string): Promise<string[]> => {
+    if (modelUpdateRef.current) throw new Error('Model update already running')
+    modelUpdateRef.current = true
+    setUpdatingModelProvider(providerId)
+    try {
+      const result = await window.electronAPI.providers.updateModels(providerId)
+      if (!result?.success) throw new Error('Could not refresh models')
+      const providers = await window.electronAPI.providers.getAll()
+      useProvidersStore.getState().setProviders(providers)
+      useProvidersStore.getState().setModelsLastUpdated(Date.now())
+      return providers.find(provider => provider.id === providerId)?.supportedModels || []
+    } finally {
+      modelUpdateRef.current = false
+      setUpdatingModelProvider(null)
+    }
+  }
+
   const handleUpdateModels = async (providerId: string) => {
     try {
       toast({
@@ -265,26 +296,12 @@ export function Providers() {
         description: t('providers.updatingModels'),
       })
       
-      const result = await window.electronAPI.providers.updateModels?.(providerId)
-      
-      if (result?.success) {
-        const providers = await window.electronAPI.providers.getAll()
-        useProvidersStore.getState().setProviders(providers)
-        toast({
-          title: t('providers.modelsUpdated'),
-          description: t('providers.modelsUpdatedDesc'),
-        })
-      } else {
-        toast({
-          title: t('providers.updateModelsFailed'),
-          description: result?.error || t('common.error'),
-          variant: 'destructive',
-        })
-      }
+      await fetchProviderModels(providerId)
+      toast({ title: t('providers.modelsUpdated'), description: t('providers.modelsUpdatedDesc') })
     } catch (error) {
       toast({
         title: t('providers.updateModelsFailed'),
-        description: t('common.error'),
+        description: t('customProvider.fetchFailed'),
         variant: 'destructive',
       })
     }
@@ -348,6 +365,7 @@ export function Providers() {
 
   const handleCreateCustomProvider = () => {
     setShowAddProviderDialog(false)
+    setEditingProvider(null)
     setShowCustomProviderForm(true)
   }
 
@@ -361,7 +379,9 @@ export function Providers() {
           headers: data.headers,
           description: data.description,
           supportedModels: data.supportedModels,
+          credentialFields: data.credentialFields,
         })
+        if (!updated) throw new Error('Provider update failed')
         if (updated) {
           store.updateProvider(editingProvider.id, updated)
           toast({
@@ -372,6 +392,7 @@ export function Providers() {
       } else {
         const newProvider = await window.electronAPI.providers.add({
           name: data.name,
+          type: 'custom',
           authType: data.authType,
           apiEndpoint: data.apiEndpoint,
           headers: data.headers,
@@ -380,6 +401,10 @@ export function Providers() {
           credentialFields: data.credentialFields,
         })
         store.addProvider(newProvider)
+        store.setSelectedProviderId(newProvider.id)
+        setEditingAccount(null)
+        setViewMode('accounts')
+        setShowAddAccountDialog(true)
         toast({
           title: t('providers.createSuccess'),
           description: t('providers.customProviderCreated'),
@@ -390,9 +415,10 @@ export function Providers() {
     } catch (error) {
       toast({
         title: editingProvider ? t('providers.updateFailed') : t('providers.createFailed'),
-        description: error instanceof Error ? error.message : t('providers.operationFailed'),
+        description: t('customProvider.saveFailed'),
         variant: 'destructive',
       })
+      throw new Error('Custom provider save failed')
     }
   }
 
@@ -433,9 +459,10 @@ export function Providers() {
     } catch (error) {
       toast({
         title: t('providers.addFailed'),
-        description: error instanceof Error ? error.message : t('providers.cannotAddAccount'),
+        description: t('providers.cannotAddAccount'),
         variant: 'destructive',
       })
+      throw new Error(t('providers.cannotAddAccount'))
     }
   }
 
@@ -445,6 +472,7 @@ export function Providers() {
       if (!account) return
       
       const updated = await window.electronAPI.accounts.update(id, updates)
+      if (!updated) throw new Error('Account update failed')
       if (updated) {
         store.updateAccount(id, updated)
         
@@ -465,9 +493,10 @@ export function Providers() {
     } catch (error) {
       toast({
         title: t('providers.updateFailed'),
-        description: error instanceof Error ? error.message : t('providers.operationFailed'),
+        description: t('providers.operationFailed'),
         variant: 'destructive',
       })
+      throw new Error(t('providers.operationFailed'))
     }
   }
 
@@ -649,8 +678,11 @@ export function Providers() {
             {selectedProvider.name} - {t('providers.accountManagement')}
           </h2>
           <p className="text-muted-foreground">
-            {t('providers.manageAllAccounts')}
+            {selectedProvider.type === 'custom' ? t('customProvider.accountPageHelp') : t('providers.manageAllAccounts')}
           </p>
+          {selectedProvider.type === 'custom' && <Button className="mt-3" variant="outline" size="sm" disabled={updatingModelProvider !== null || providerAccounts.length === 0} onClick={() => { void handleUpdateModels(selectedProvider.id) }}>
+            <Download className="mr-2 h-4 w-4" />{t('customProvider.fetchModels')}
+          </Button>}
         </div>
 
         <AccountLivenessPanel controller={liveness} />
@@ -695,8 +727,11 @@ export function Providers() {
           <h2 className="text-2xl font-bold tracking-tight">{t('providers.title')}</h2>
           <p className="text-muted-foreground">{t('providers.subtitle')}</p>
         </div>
-        <Button variant="outline" disabled={liveness.busy || store.accounts.length === 0}
-          onClick={() => { void liveness.start({}) }}>{t('accountLiveness.allAccounts')}</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={handleCreateCustomProvider}><Plus className="mr-2 h-4 w-4" />{t('providers.createCustomProvider')}</Button>
+          <Button variant="outline" disabled={liveness.busy || store.accounts.length === 0}
+            onClick={() => { void liveness.start({}) }}>{t('accountLiveness.allAccounts')}</Button>
+        </div>
       </div>
 
       <AccountLivenessPanel controller={liveness} />
@@ -736,12 +771,13 @@ export function Providers() {
                 activeAccountCount={store.accountCounts[provider.id]?.active || 0}
                 onToggle={handleToggleProvider}
                 onEdit={handleEditProvider}
-                onDelete={handleDeleteProvider}
+                onDelete={id => setDeletingProvider(store.getProviderById(id) || null)}
                 onDuplicate={handleDuplicateProvider}
                 onCheckStatus={handleCheckProviderStatus}
                 onManageAccounts={handleManageAccounts}
                 onUpdateModels={handleUpdateModels}
                 onManageModels={handleManageModels}
+                isUpdatingModels={updatingModelProvider !== null}
               />
             ))}
           </div>
@@ -758,7 +794,10 @@ export function Providers() {
       />
 
       <CustomProviderForm
+        key={editingProvider?.id || 'new-custom-provider'}
         open={showCustomProviderForm}
+        providerId={editingProvider?.id}
+        onFetchModels={editingProvider && store.accounts.some(account => account.providerId === editingProvider.id) ? () => fetchProviderModels(editingProvider.id) : undefined}
         onOpenChange={(open) => {
           setShowCustomProviderForm(open)
           if (!open) setEditingProvider(null)
@@ -771,8 +810,22 @@ export function Providers() {
           headers: editingProvider.headers,
           description: editingProvider.description || '',
           supportedModels: editingProvider.supportedModels || [],
+          credentialFields: editingProvider.credentialFields,
         } : undefined}
       />
+
+      <Dialog open={!!deletingProvider} onOpenChange={open => { if (!open && !deletingProviderRef.current) setDeletingProvider(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('providers.deleteProvider')}</DialogTitle>
+            <DialogDescription>{t('customProvider.deleteConfirm', { name: deletingProvider?.name, count: deletingProvider ? store.getAccountsByProvider(deletingProvider.id).length : 0 })}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={isDeletingProvider} onClick={() => setDeletingProvider(null)}>{t('common.cancel')}</Button>
+            <Button variant="destructive" disabled={isDeletingProvider} onClick={() => { if (deletingProvider) void handleDeleteProvider(deletingProvider.id) }}>{t('common.delete')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {modelEditorProvider && (
         <ModelEditor

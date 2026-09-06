@@ -41,6 +41,7 @@ interface ProviderCardProps {
   onManageAccounts: (id: string) => void
   onUpdateModels?: (id: string) => void
   onManageModels?: (id: string) => void
+  isUpdatingModels?: boolean
   className?: string
 }
 
@@ -63,6 +64,7 @@ export function ProviderCard({
   onManageAccounts,
   onUpdateModels,
   onManageModels,
+  isUpdatingModels,
   className,
 }: ProviderCardProps) {
   const { t } = useTranslation()
@@ -108,7 +110,7 @@ export function ProviderCard({
           <div>
             <CardTitle className="text-base flex items-center gap-2">
               {getProviderName()}
-              {isBuiltin && (
+              {onManageModels && (
                 <Badge variant="outline" className="text-xs">
                   {t('providers.builtin')}
                 </Badge>
@@ -155,8 +157,8 @@ export function ProviderCard({
                   {t('providers.manageModels')}
                 </DropdownMenuItem>
               )}
-              {isBuiltin && ((provider as any).modelsApiEndpoint || provider.id === 'arena') && (
-                <DropdownMenuItem onClick={() => onUpdateModels?.(provider.id)}>
+              {(provider.type === 'custom' || (provider as any).modelsApiEndpoint || provider.id === 'arena') && (
+                <DropdownMenuItem disabled={isUpdatingModels} onClick={() => onUpdateModels?.(provider.id)}>
                   <Download className="mr-2 h-4 w-4" />
                   {t('providers.updateModels')}
                 </DropdownMenuItem>
@@ -228,6 +230,11 @@ export function ProviderCard({
             )}
           </Button>
         </div>
+        {!isBuiltin && <div className="mt-4 flex flex-wrap gap-2 border-t pt-3">
+          <Button size="sm" variant="outline" onClick={() => onEdit(provider.id)}><Edit className="mr-1.5 h-3.5 w-3.5" />{t('providers.editProvider')}</Button>
+          <Button size="sm" variant="outline" disabled={isUpdatingModels || accountCount === 0} onClick={() => onUpdateModels?.(provider.id)} title={accountCount === 0 ? t('customProvider.fetchHelp') : undefined}><Download className="mr-1.5 h-3.5 w-3.5" />{t('customProvider.fetchModels')}</Button>
+          <Button size="sm" variant="ghost" className="text-destructive" onClick={() => onDelete(provider.id)}><Trash2 className="mr-1.5 h-3.5 w-3.5" />{t('common.delete')}</Button>
+        </div>}
       </CardContent>
     </Card>
   )

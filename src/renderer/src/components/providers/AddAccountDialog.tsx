@@ -356,7 +356,7 @@ export function AddAccountDialog({
               {isEditing ? t('providers.editAccount') : t('providers.addAccount')}
             </DialogTitle>
             <DialogDescription>
-              {t('providers.manageAllAccounts')} - {provider.name}
+              {provider.type === 'custom' ? t('customProvider.keyAccountHelp') : t('providers.manageAllAccounts')} - {provider.name}
             </DialogDescription>
           </DialogHeader>
 

@@ -23,6 +23,7 @@ WebChat2api is a maintained derivative of **Chat2API**, built as an Electron des
 | **Claude Code and tool calls** | Supports Messages, streaming events, and client-side tool round trips. The Settings tool test performs two real, harmless turns rather than reporting connection success alone. |
 | **Arena text and images** | Uses a normal Chrome/Edge profile dedicated to each account and its runtime model catalogue, with separate text continuation, single-image generation, and account/model limits. |
 | **Local proxy controls** | Manage the listener, gateway API keys, model mappings, and request logs, with consistent system-proxy and direct-network settings. |
+| **Custom API providers** | Add an OpenAI-compatible Base URL, separate API-key accounts, and models. Includes model discovery, edit/delete, native tools, and two-turn checks. See the [setup guide](docs/providers/custom.md). |
 
 ## A look inside
 

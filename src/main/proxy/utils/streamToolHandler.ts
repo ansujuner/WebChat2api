@@ -13,6 +13,13 @@ import { parseToolCallsFromText } from './toolParser'
 
 // Only state construction is shared; createBaseChunk remains the local legacy export.
 import { createStreamState } from './toolParser/index'
+import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
+import type { ToolCallingPlan } from '../toolCalling/types'
+
+// Compatibility seam for website handlers not yet migrated to the new class.
+// A supplied plan always wins over the old unscoped bracket parser, including
+// disabled plans. No schema means text, not executable model-generated tools.
+const managedParsers = new WeakMap<ToolCallState, ToolStreamParser | null>()
 
 // Re-export StreamState type for backward compatibility
 export type { StreamState } from './toolParser/index'
@@ -32,7 +39,17 @@ export interface ToolCallState {
  * Create tool call state
  * @deprecated Use createStreamState from './toolParser/index.ts' instead
  */
-export function createToolCallState(): ToolCallState {
+export function createToolCallState(plan?: ToolCallingPlan): ToolCallState {
+  if (plan) {
+    const parser = plan.shouldParseResponse ? new ToolStreamParser(plan) : null
+    const state: ToolCallState = {
+      contentBuffer: '', toolCallIndex: 0,
+      get isBufferingToolCall() { return parser?.isBuffering() ?? false },
+      get hasEmittedToolCall() { return parser?.hasEmittedToolCall() ?? false },
+    }
+    managedParsers.set(state, parser)
+    return state
+  }
   return createStreamState()
 }
 
@@ -48,6 +65,12 @@ export function processStreamContent(
   isFirstChunk: boolean,
   modelType: string = 'default'
 ): { chunks: any[], shouldFlush: boolean } {
+  if (managedParsers.has(state)) {
+    const parser = managedParsers.get(state)
+    const chunks = parser ? parser.push(content, baseChunk, isFirstChunk) : content ? [{ ...baseChunk,
+      choices: [{ index: 0, delta: { ...(isFirstChunk ? { role: 'assistant' } : {}), content }, finish_reason: null }] }] : []
+    return { chunks, shouldFlush: !parser?.isBuffering() }
+  }
   const result: any[] = []
   const marker = '[function_calls]'
 
@@ -230,6 +253,7 @@ export function flushToolCallBuffer(
   baseChunk: any,
   modelType: string = 'default'
 ): any[] {
+  if (managedParsers.has(state)) return managedParsers.get(state)?.flush(baseChunk) ?? []
   const result: any[] = []
 
   if (!state.contentBuffer) {

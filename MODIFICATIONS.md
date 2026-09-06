@@ -7,6 +7,13 @@ The original copyright and **GPL-3.0-or-later** grant are retained in
 
 ## Changes from the supplied project
 
+- v1.6.1 (2026-09-06): restored native custom-provider tools and stateless
+  tool-result round trips; classified upstream verification/auth/quota blocks
+  separately from tool parsing. Enabled custom-provider creation, editing,
+  API-key accounts and read-only model discovery with validated configuration.
+  Added production IPC and both API protocols' streaming/non-streaming tool
+  checks against a loopback-only fixture, not real account simulations.
+
 - v1.6.0 (2026-09-06): refreshed the application visual system, original
   WebChat2api artwork, dashboard introduction and local connection display.
   Chinese is the new-install default; existing language choices are retained
