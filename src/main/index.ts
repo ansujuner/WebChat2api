@@ -11,6 +11,8 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { startProxyService } from './ipc/handlers'
 import { runLocalProbe, runDeepSeekModesProbe } from './diagnostics/localProbe'
 import { runDeepSeekLoginProbe } from './diagnostics/deepseekLoginProbe'
+import { runZaiAccountLoginProbe } from './diagnostics/zaiAccountLoginProbe'
+import { zaiAccountBrowserManager } from './oauth/zaiAccountBrowser'
 import { externalBrowserLoginManager } from './oauth/externalBrowserLogin'
 import { runToolCallingSmoke } from './diagnostics/toolCallingSmoke'
 import { arenaBrowserManager } from './arena/browserManager'
@@ -78,18 +80,18 @@ function enqueueLocalCommand(argv: string[]): void {
     return
   }
   localCommands = localCommands.then(async () => {
-    const mode = argv.find(arg => /^--chat2api-probe=(catalog|live|stream|deepseek|login|tools|arena-login|arena|accounts)$/.test(arg))?.split('=')[1]
+    const mode = argv.find(arg => /^--chat2api-probe=(catalog|live|stream|deepseek|login|tools|arena-login|arena|accounts|zai-login)$/.test(arg))?.split('=')[1]
     if (!mode) return
     const outputDirectory = app.isPackaged ? join(app.getPath('userData'), 'diagnostics') : join(app.getAppPath(), 'artifacts')
     const reportPath = join(outputDirectory, `proxy-${mode}-probe.json`)
-    const options = { live: !['catalog', 'login', 'arena-login'].includes(mode), stream: mode === 'stream', protocol: mode === 'stream' ? 'anthropic' as const : 'openai' as const }
+    const options = { live: !['catalog', 'login', 'arena-login', 'zai-login'].includes(mode), stream: mode === 'stream', protocol: mode === 'stream' ? 'anthropic' as const : 'openai' as const }
     try {
       // Check report writability before any real generation.
       await mkdir(outputDirectory, { recursive: true })
       await writeFile(reportPath, JSON.stringify({ status: 'running', checkedAt: new Date().toISOString() }), 'utf8')
-      if (mode === 'login' || mode === 'arena-login') {
+      if (mode === 'login' || mode === 'arena-login' || mode === 'zai-login') {
         const save = (report: unknown) => writeFile(reportPath, JSON.stringify({ ...(report as object), checkedAt: new Date().toISOString() }, null, 2), 'utf8')
-        await save(await (mode === 'login' ? runDeepSeekLoginProbe(save) : runArenaLoginProbe(save)))
+        await save(await (mode === 'login' ? runDeepSeekLoginProbe(save) : mode === 'zai-login' ? runZaiAccountLoginProbe(save) : runArenaLoginProbe(save)))
         return
       }
       if (mode === 'accounts') {
@@ -144,11 +146,11 @@ async function initializeApp(): Promise<void> {
   app.on('before-quit', (event) => {
     // Let the app-owned browser close and remove its temporary profile before
     // Electron exits. Repeated quit events must not race the same cleanup.
-    if (!loginShutdownComplete && (loginShutdownPending || externalBrowserLoginManager.isWindowOpen() || arenaBrowserManager.hasOpenBrowsers())) {
+    if (!loginShutdownComplete && (loginShutdownPending || externalBrowserLoginManager.isWindowOpen() || arenaBrowserManager.hasOpenBrowsers() || zaiAccountBrowserManager.hasOpenBrowsers())) {
       event.preventDefault()
       if (!loginShutdownPending) {
         loginShutdownPending = true
-        void Promise.all([externalBrowserLoginManager.cancelAndWait(), arenaBrowserManager.destroy()]).catch(() => {
+        void Promise.all([externalBrowserLoginManager.cancelAndWait(), arenaBrowserManager.destroy(), zaiAccountBrowserManager.destroy()]).catch(() => {
           console.error('[OAuth] The isolated login browser could not finish closing before exit.')
         }).finally(() => {
           loginShutdownComplete = true

@@ -155,6 +155,8 @@ export function AddAccountDialog({
   const [name, setName] = useState('')
   const nameWasEdited = useRef(false)
   const credentialRevision = useRef(0)
+  const credentialsWereEdited = useRef(false)
+  const credentialBaselineReady = useRef(true)
   const dialogTarget = useRef({ key: '', version: 0, open: false })
   const operation = useRef<{ version: number; credentials: number; kind: 'login' | 'validate' | 'save' } | null>(null)
   const targetKey = `${open ? 'open' : 'closed'}:${provider?.id || ''}:${editingAccount?.id || 'new'}`
@@ -178,12 +180,14 @@ export function AddAccountDialog({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isOAuthLoading, setIsOAuthLoading] = useState(false)
   const [oauthStatus, setOAuthStatus] = useState<string>('')
+  const [accountLoginSaved, setAccountLoginSaved] = useState(false)
 
   const isEditing = !!editingAccount
   const builtinProvider = provider as BuiltinProviderConfig | null
   const credentialFields: CredentialField[] = builtinProvider?.credentialFields || getDefaultCredentialFields(provider?.authType, t)
   const supportsOAuth = provider?.type === 'builtin' && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'arena'].includes(provider.id)
   const canLogin = supportsOAuth && (!isEditing || provider?.id !== 'arena')
+  const isAccountReauthentication = canLogin && isEditing && provider?.id === 'zai'
   const busy = isValidating || isSubmitting || isOAuthLoading
 
   const beginOperation = (kind: 'login' | 'validate' | 'save') => {
@@ -211,6 +215,9 @@ export function AddAccountDialog({
     setIsSubmitting(false)
     setIsOAuthLoading(false)
     setOAuthStatus('')
+    setAccountLoginSaved(false)
+    credentialsWereEdited.current = false
+    credentialBaselineReady.current = true
     if (open) {
       if (editingAccount) {
         setName(editingAccount.name)
@@ -228,6 +235,8 @@ export function AddAccountDialog({
 
   const resetForm = () => {
     credentialRevision.current += 1
+    credentialsWereEdited.current = false
+    credentialBaselineReady.current = true
     setName('')
     nameWasEdited.current = false
     setDailyLimit('')
@@ -236,16 +245,20 @@ export function AddAccountDialog({
     setActiveTab(provider?.id === 'arena' ? 'oauth' : 'manual')
     setIsOAuthLoading(false)
     setOAuthStatus('')
+    setAccountLoginSaved(false)
   }
 
   const handleCredentialChange = (fieldName: string, value: string) => {
-    if (operation.current) return
+    if (operation.current || !credentialBaselineReady.current) return
     credentialRevision.current += 1
+    credentialsWereEdited.current = true
     setCredentials(prev => ({
       ...prev,
       [fieldName]: value,
     }))
     setValidationResult({})
+    setOAuthStatus('')
+    setAccountLoginSaved(false)
     if (!nameWasEdited.current && !isEditing) setName('')
   }
 
@@ -257,7 +270,7 @@ export function AddAccountDialog({
   }
 
   const handleValidate = async () => {
-    if (!provider || !open || operation.current) return
+    if (!provider || !open || operation.current || !credentialBaselineReady.current) return
 
     const requiredFields = credentialFields.filter(f => f.required)
     const missingFields = requiredFields.filter(f => !credentials[f.name])
@@ -274,6 +287,8 @@ export function AddAccountDialog({
     if (!request) return
     setIsValidating(true)
     setValidationResult({})
+    setOAuthStatus('')
+    setAccountLoginSaved(false)
 
     try {
       const result = await onValidateToken(provider.id, { ...credentials })
@@ -298,7 +313,7 @@ export function AddAccountDialog({
     if (!provider || !open || operation.current) return
     if (provider?.id === 'arena' && !isEditing && !validationResult.valid) return
     const requiredFields = credentialFields.filter(f => f.required)
-    const missingFields = requiredFields.filter(f => !credentials[f.name])
+    const missingFields = (!isEditing || credentialsWereEdited.current) ? requiredFields.filter(f => !credentials[f.name]) : []
     
     if (missingFields.length > 0) {
       setValidationResult({
@@ -317,7 +332,7 @@ export function AddAccountDialog({
         name: name.trim(),
         nameSource: nameWasEdited.current && name.trim() ? 'custom' as const : 'auto' as const,
         ...(validationResult.valid ? validatedAccountIdentity(validationResult.userInfo) : {}),
-        credentials: { ...credentials },
+        ...(!isEditing || credentialsWereEdited.current ? { credentials: { ...credentials } } : {}),
         dailyLimit: dailyLimit ? parseInt(dailyLimit, 10) : undefined,
       }
 
@@ -325,7 +340,7 @@ export function AddAccountDialog({
         if (!onUpdateAccount) throw new Error(t('providers.saveFailed'))
         await onUpdateAccount(editingAccount.id, data)
       } else {
-        await onAddAccount(data)
+        await onAddAccount({ ...data, credentials: { ...credentials } })
       }
 
       if (!canApplyResult(request)) return
@@ -342,8 +357,52 @@ export function AddAccountDialog({
     }
   }
 
+  const handleAccountReauthentication = async () => {
+    if (!editingAccount || !isAccountReauthentication || credentialsWereEdited.current) return
+    const request = beginOperation('login')
+    if (!request) return
+    const accountId = editingAccount.id
+    setIsOAuthLoading(true)
+    setValidationResult({})
+    setAccountLoginSaved(false)
+    setOAuthStatus(t('providers.accountLoginRestoring'))
+    try {
+      const result = await window.electronAPI.accounts.reauthenticate(accountId)
+      if (!canApplyResult(request)) return
+      if (!result || result.accountId !== accountId || !result.success || !['restored', 'updated'].includes(result.state)) {
+        const allowedErrors = ['invalid_account', 'unsupported_provider', 'busy', 'cancelled', 'timeout', 'identity_mismatch', 'identity_unverified', 'login_required', 'network_error', 'browser_error', 'account_changed', 'save_failed']
+        const code = result?.accountId === accountId && allowedErrors.includes(result.errorCode || '') ? result.errorCode : 'browser_error'
+        setOAuthStatus(t(`providers.accountLoginErrors.${code}`))
+        return
+      }
+      // Main has already verified this account and committed any new credentials.
+      // Never let an old editor draft overwrite that saved value on a later save.
+      credentialsWereEdited.current = false
+      credentialBaselineReady.current = false
+      setCredentials({})
+      setAccountLoginSaved(true)
+      setOAuthStatus(t(result.state === 'updated' ? 'providers.accountLoginUpdated' : 'providers.accountLoginRestored'))
+      try {
+        const refreshed = await window.electronAPI.accounts.getById(accountId, true)
+        if (!canApplyResult(request)) return
+        if (!refreshed || refreshed.id !== accountId || refreshed.providerId !== provider?.id) throw new Error('Account baseline unavailable')
+        setCredentials({ ...refreshed.credentials })
+        credentialBaselineReady.current = true
+        credentialRevision.current += 1
+        applyValidatedName({ email: refreshed.email, userId: refreshed.providerUserId })
+      } catch {
+        if (canApplyResult(request)) setOAuthStatus(t('providers.accountLoginSavedRefreshFailed'))
+      }
+    } catch {
+      if (canApplyResult(request)) setOAuthStatus(t('providers.accountLoginErrors.browser_error'))
+    } finally {
+      if (ownsOperation(request)) { operation.current = null; setIsOAuthLoading(false) }
+    }
+  }
+
   const handleOpenOAuthBrowser = async () => {
     if (!provider || !canLogin) return
+    if (isAccountReauthentication) return handleAccountReauthentication()
     const request = beginOperation('login')
     if (!request) return
     setIsOAuthLoading(true)
@@ -376,6 +435,7 @@ export function AddAccountDialog({
           return
         }
         credentialRevision.current += 1
+        credentialsWereEdited.current = true
         setCredentials({ ...mappedCredentials })
         setOAuthStatus(t(isEditing ? 'providers.reloginSaveRequired' : 'providers.loginSuccess'))
         
@@ -462,7 +522,7 @@ export function AddAccountDialog({
                     onChange={handleCredentialChange}
                     t={t}
                     providerId={provider?.id}
-                    disabled={busy}
+                    disabled={busy || !credentialBaselineReady.current}
                   />
                 </TabsContent>
 
@@ -470,15 +530,15 @@ export function AddAccountDialog({
                   <div className="flex flex-col items-center justify-center py-6 space-y-4">
                     <div className="text-center">
                       <p className="text-sm text-muted-foreground mb-4">
-                        {t(provider?.id === 'arena' ? 'arena.browserLoginHelp' : provider?.id === 'deepseek' ? 'deepseek.externalBrowserLoginHelp' : 'providers.clickToOpenOAuth')}
+                        {t(isAccountReauthentication ? 'providers.accountLoginHelp' : provider?.id === 'arena' ? 'arena.browserLoginHelp' : provider?.id === 'deepseek' ? 'deepseek.externalBrowserLoginHelp' : 'providers.clickToOpenOAuth')}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {t(provider?.id === 'arena' ? 'arena.profileOnlyHelp' : isEditing ? 'providers.reloginHelp' : 'providers.oauthAutoCapture')}
+                        {t(isAccountReauthentication ? 'providers.accountLoginSessionHelp' : provider?.id === 'arena' ? 'arena.profileOnlyHelp' : isEditing ? 'providers.reloginHelp' : 'providers.oauthAutoCapture')}
                       </p>
                     </div>
                     <Button 
                       onClick={handleOpenOAuthBrowser}
-                      disabled={busy}
+                      disabled={busy || (isAccountReauthentication && credentialsWereEdited.current)}
                       data-testid="account-oauth-login"
                     >
                       {isOAuthLoading ? (
@@ -489,12 +549,15 @@ export function AddAccountDialog({
                       ) : (
                         <>
                           <ExternalLink className="mr-2 h-4 w-4" />
-                          {t(provider?.id === 'arena' ? 'arena.browserLogin' : isEditing ? 'providers.relogin' : 'providers.openOAuthLogin')}
+                          {t(isAccountReauthentication ? 'providers.openAccountLogin' : provider?.id === 'arena' ? 'arena.browserLogin' : isEditing ? 'providers.relogin' : 'providers.openOAuthLogin')}
                         </>
                       )}
                     </Button>
+                    {isAccountReauthentication && credentialsWereEdited.current && (
+                      <p role="status" className="text-sm text-amber-600">{t('providers.accountLoginSaveDraftFirst')}</p>
+                    )}
                     {oauthStatus && !isOAuthLoading && (
-                      <p role="status" className={`text-sm ${validationResult.valid ? 'text-green-600' : 'text-red-500'}`}>
+                      <p role="status" className={`text-sm ${accountLoginSaved || validationResult.valid ? 'text-green-600' : 'text-red-500'}`}>
                         {oauthStatus}
                       </p>
                     )}
@@ -511,7 +574,7 @@ export function AddAccountDialog({
                 onChange={handleCredentialChange}
                 t={t}
                 providerId={provider?.id}
-                disabled={busy}
+                disabled={busy || !credentialBaselineReady.current}
               />
             )}
 
@@ -548,7 +611,7 @@ export function AddAccountDialog({
             <Button
               variant="outline"
               onClick={handleValidate}
-              disabled={busy}
+              disabled={busy || !credentialBaselineReady.current}
             >
               {isValidating ? (
                 <>

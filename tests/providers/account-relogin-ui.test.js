@@ -26,14 +26,14 @@ function translate(key, args = {}, lang = 'zh-CN') {
 const wrap = ({ children }) => React.createElement('div', null, children)
 const Button = ({ children, disabled }) => React.createElement('button', { disabled }, children)
 const TabsTrigger = ({ children, value, disabled }) => React.createElement('button', { 'data-tab': value, disabled }, children)
-const provider = (id = 'zai', changes = {}) => ({ id, name: id, type: 'builtin', authType: 'token', credentialFields: [{ name: 'token', label: 'Token', type: 'password', required: true }], ...changes })
-const account = (changes = {}) => ({ id: 'existing-a', providerId: 'zai', name: 'My custom label', nameSource: 'custom', email: 'same@example.test', providerUserId: 'user-a', credentials: { token: 'OLD-FIXTURE', captcha_verify_param: 'STALE-CAPTCHA-FIXTURE' }, enabled: false, status: 'expired', cooldownUntil: 9999999999999, cooldownReason: 'temporary_ban', ...changes })
+const provider = (id = 'deepseek', changes = {}) => ({ id, name: id, type: 'builtin', authType: 'token', credentialFields: [{ name: 'token', label: 'Token', type: 'password', required: true }], ...changes })
+const account = (changes = {}) => ({ id: 'existing-a', providerId: 'deepseek', name: 'My custom label', nameSource: 'custom', email: 'same@example.test', providerUserId: 'user-a', credentials: { token: 'OLD-FIXTURE', captcha_verify_param: 'STALE-CAPTCHA-FIXTURE' }, enabled: false, status: 'expired', cooldownUntil: 9999999999999, cooldownReason: 'temporary_ban', ...changes })
 const success = changes => ({ success: true, credentials: { token: 'NEW-FIXTURE' }, accountInfo: { userId: 'user-a', email: 'same@example.test' }, ...changes })
 function allNodes(tree) { const values = []; const walk = node => { if (React.isValidElement(node)) { values.push(node); React.Children.forEach(node.props.children, walk) } }; walk(tree); return values }
 const text = node => typeof node === 'string' ? node : React.isValidElement(node) ? React.Children.toArray(node.props.children).map(text).join('') : ''
 function fixture(options = {}) {
   let index = 0, props = { open: true, provider: provider(), editingAccount: account(), ...options.props }
-  const values = [], effectSlots = [], pending = [], calls = { login: [], validate: [], add: [], update: [], close: [] }
+  const values = [], effectSlots = [], pending = [], calls = { login: [], reauthenticate: [], getById: [], validate: [], add: [], update: [], close: [] }
   const hooks = {
     useState(initial) { const slot = index++; if (!Object.hasOwn(values, slot)) values[slot] = typeof initial === 'function' ? initial() : initial; return [values[slot], value => { values[slot] = typeof value === 'function' ? value(values[slot]) : value }] },
     useRef(initial) { const slot = index++; if (!Object.hasOwn(values, slot)) values[slot] = { current: initial }; return values[slot] },
@@ -47,7 +47,13 @@ function fixture(options = {}) {
     '@/components/ui/button': { Button }, '@/components/ui/input': { Input: props => React.createElement('input', props) }, '@/components/ui/label': { Label: wrap }, '@/components/ui/badge': { Badge: wrap },
     '@/components/ui/tabs': { Tabs: wrap, TabsContent: wrap, TabsList: wrap, TabsTrigger },
     '../../../../shared/accountIdentity': accountIdentity,
-    globals: { window: { electronAPI: { oauth: { startInAppLogin: async (...args) => { calls.login.push(args); return options.login ? options.login() : success() } } } } },
+    globals: { window: { electronAPI: {
+      oauth: { startInAppLogin: async (...args) => { calls.login.push(args); return options.login ? options.login() : success() } },
+      accounts: {
+        reauthenticate: async (...args) => { calls.reauthenticate.push(args); return options.reauthenticate ? options.reauthenticate() : { success: true, accountId: 'existing-a', state: 'updated' } },
+        getById: async (...args) => { calls.getById.push(args); return options.getById ? options.getById() : account({ providerId: 'zai', credentials: { token: 'SAVED-FIXTURE' } }) },
+      },
+    } } },
   })
   const callbacks = {
     onOpenChange(open) { calls.close.push(open) },
@@ -76,7 +82,7 @@ test('existing supported builtin accounts expose OAuth login beside manual crede
     const tabs = allNodes(f.render()).filter(node => node.type === TabsTrigger)
     assert.deepEqual(tabs.map(node => node.props.value), ['manual', 'oauth'])
     assert.equal(text(tabs[1]), f.t('providers.oauthLogin'))
-    assert.equal(text(f.find(node => node.props['data-testid'] === 'account-oauth-login')), f.t('providers.relogin'))
+    assert.equal(text(f.find(node => node.props['data-testid'] === 'account-oauth-login')), f.t(id === 'zai' ? 'providers.openAccountLogin' : 'providers.relogin'))
   }
   for (const p of [provider('arena'), provider('zai', { type: 'custom' }), provider('custom-id', { type: 'custom' })]) {
     const f = fixture({ props: { provider: p, editingAccount: account({ providerId: p.id }) } })
@@ -88,7 +94,7 @@ test('successful re-login is draft-only until explicit save, updates exactly the
   const original = Object.freeze(account())
   const f = fixture({ props: { editingAccount: original } })
   await f.login()
-  assert.deepEqual(f.calls.login, [['zai', 'zai']])
+  assert.deepEqual(f.calls.login, [['deepseek', 'deepseek']])
   assert.deepEqual(f.calls.add, []); assert.deepEqual(f.calls.update, [])
   assert.equal(f.name(), original.name)
   assert.deepEqual(plain(f.credentials()), { token: 'NEW-FIXTURE' })
@@ -216,4 +222,153 @@ test('help and saved-draft notices describe credential validation/liveness and n
     assert.ok(html.includes(f.t('providers.reloginHelp')))
     for (const key of ['relogin', 'reloginHelp', 'reloginSaveRequired', 'reloginIdentityMismatch', 'reloginInvalidCredentials']) assert.notEqual(f.t(`providers.${key}`), `providers.${key}`)
   }
+})
+
+const zaiFixture = (options = {}) => fixture({ ...options, props: { provider: provider('zai'), editingAccount: account({ providerId: 'zai' }), ...options.props } })
+
+test('existing Zai login binds only the account ID, refreshes the backend-saved baseline and never needs a second credential save', async () => {
+  for (const state of ['restored', 'updated']) {
+    const f = zaiFixture({ reauthenticate: async () => ({ success: true, accountId: 'existing-a', state }) })
+    await f.login()
+    assert.deepEqual(f.calls.reauthenticate, [['existing-a']])
+    assert.deepEqual(f.calls.login, []); assert.deepEqual(f.calls.update, []); assert.deepEqual(f.calls.add, [])
+    assert.deepEqual(f.calls.getById, [['existing-a', true]])
+    assert.deepEqual(plain(f.credentials()), { token: 'SAVED-FIXTURE' })
+    assert.equal(f.status(), f.t(state === 'updated' ? 'providers.accountLoginUpdated' : 'providers.accountLoginRestored'))
+    assert.equal(f.name(), 'My custom label')
+    assert.equal(allNodes(f.render()).some(node => text(node) === f.t('providers.validationSuccess')), false)
+    await f.save()
+    assert.equal(f.calls.update.length, 1)
+    assert.equal(f.calls.update[0][0], 'existing-a')
+    for (const key of ['credentials', 'status', 'enabled', 'cooldownUntil', 'cooldownReason']) assert.equal(Object.hasOwn(f.calls.update[0][1], key), false)
+  }
+})
+
+test('unchanged credential edits never overwrite the backend; a deliberate edit saves the complete latest baseline', async () => {
+  const untouched = fixture({ props: { editingAccount: account({ credentials: {} }) } })
+  await untouched.save()
+  assert.equal(untouched.calls.update.length, 1)
+  assert.equal(Object.hasOwn(untouched.calls.update[0][1], 'credentials'), false)
+  const f = zaiFixture({ getById: async () => account({ providerId: 'zai', credentials: { token: 'ROTATED-FIXTURE', other: 'LATEST-FIELD' } }) })
+  await f.login()
+  assert.deepEqual(f.calls.reauthenticate, [['existing-a']])
+  assert.deepEqual(plain(f.credentials()), { token: 'ROTATED-FIXTURE', other: 'LATEST-FIELD' })
+  f.find(node => node.props.fields && node.props.credentials).props.onChange('token', 'MANUAL-FIXTURE')
+  assert.equal(f.status(), f.t('providers.accountLoginSaveDraftFirst'))
+  await f.save()
+  assert.deepEqual(f.calls.update[0][1].credentials, { token: 'MANUAL-FIXTURE', other: 'LATEST-FIELD' })
+})
+
+test('unsaved manual Zai credentials block restoration synchronously without discarding the draft', async () => {
+  const f = zaiFixture()
+  f.find(node => node.props.fields && node.props.credentials).props.onChange('token', 'UNSAVED-FIXTURE')
+  assert.equal(f.find(node => node.props['data-testid'] === 'account-oauth-login').props.disabled, true)
+  await f.login()
+  assert.deepEqual(f.calls.reauthenticate, []); assert.deepEqual(f.calls.login, []); assert.deepEqual(f.calls.getById, [])
+  assert.equal(f.credentials().token, 'UNSAVED-FIXTURE')
+  assert.equal(f.status(), f.t('providers.accountLoginSaveDraftFirst'))
+  await f.save()
+  assert.equal(f.calls.update[0][1].credentials.token, 'UNSAVED-FIXTURE')
+})
+
+test('new Zai accounts still use the normal OAuth draft flow instead of restoring another account', async () => {
+  const f = zaiFixture({ props: { editingAccount: null } })
+  await f.login()
+  assert.deepEqual(f.calls.login, [['zai', 'zai']]); assert.deepEqual(f.calls.reauthenticate, [])
+  await f.save()
+  assert.deepEqual(f.calls.add[0].credentials, { token: 'NEW-FIXTURE' })
+})
+
+test('Zai restoration failures preserve the original draft, translate all safe errors and never render provider text', async () => {
+  const errors = ['invalid_account', 'unsupported_provider', 'busy', 'cancelled', 'timeout', 'identity_mismatch', 'identity_unverified', 'login_required', 'network_error', 'browser_error', 'account_changed', 'save_failed']
+  for (const language of ['zh-CN', 'en-US']) {
+    for (const errorCode of [...errors, 'SECRET-ERROR-FIXTURE', '__proto__']) {
+      const f = zaiFixture({ language, reauthenticate: async () => ({ success: false, accountId: 'existing-a', state: 'failed', errorCode, error: 'SECRET-ERROR-FIXTURE' }) })
+      await f.login()
+      const key = `providers.accountLoginErrors.${errors.includes(errorCode) ? errorCode : 'browser_error'}`
+      assert.equal(f.status(), f.t(key)); assert.notEqual(f.status(), key)
+      assert.deepEqual(plain(f.credentials()), account().credentials)
+      assert.deepEqual(f.calls.getById, []); assert.deepEqual(f.calls.update, [])
+      assert.doesNotMatch(f.status(), /SECRET-ERROR-FIXTURE|__proto__/)
+    }
+  }
+  for (const result of [null, { success: true, accountId: 'other-account', state: 'updated' }, { success: true, accountId: 'existing-a', state: 'unverified' }]) {
+    const f = zaiFixture({ reauthenticate: async () => result })
+    await f.login(); assert.deepEqual(f.calls.getById, []); assert.deepEqual(plain(f.credentials()), account().credentials)
+  }
+  const thrown = zaiFixture({ reauthenticate: async () => { throw Error('SECRET-ERROR-FIXTURE') } })
+  await thrown.login(); assert.equal(thrown.status(), thrown.t('providers.accountLoginErrors.browser_error'))
+})
+
+test('restoration has a single busy operation through the saved-baseline read and forbids duplicate login/save/validation', async () => {
+  const pending = deferred(), refresh = deferred(), f = zaiFixture({ reauthenticate: () => pending.promise, getById: () => refresh.promise })
+  const first = f.login()
+  assert.equal(text(f.find(node => node.props['data-testid'] === 'account-oauth-login')), f.t('providers.accountLoginRestoring'))
+  await f.login(); await f.save(); await f.validate()
+  assert.equal(f.calls.reauthenticate.length, 1); assert.deepEqual(f.calls.update, []); assert.deepEqual(f.calls.validate, [])
+  pending.resolve({ success: true, accountId: 'existing-a', state: 'updated' })
+  await Promise.resolve(); await Promise.resolve()
+  await f.login(); await f.save(); await f.validate()
+  assert.equal(f.calls.reauthenticate.length, 1); assert.equal(f.find(node => node.props.fields && node.props.credentials).props.disabled, true)
+  refresh.resolve(account({ providerId: 'zai', credentials: { token: 'LATEST-FIXTURE' } })); await first
+  assert.equal(f.find(node => node.props['data-testid'] === 'account-oauth-login').props.disabled, false)
+  assert.equal(f.credentials().token, 'LATEST-FIXTURE')
+})
+
+test('closing or switching accounts discards both late restoration and late saved-baseline reads', async () => {
+  for (const stage of ['reauthenticate', 'getById']) {
+    for (const target of ['close', 'account', 'provider', 'reopen']) {
+      const pending = deferred(), f = zaiFixture({ [stage]: () => pending.promise })
+      const first = f.login()
+      await Promise.resolve(); await Promise.resolve()
+      if (target === 'close') f.close()
+      else if (target === 'account') f.setProps({ editingAccount: account({ id: 'account-b', providerId: 'zai', credentials: { token: 'B-FIXTURE' } }) })
+      else if (target === 'provider') f.setProps({ provider: provider('kimi'), editingAccount: account({ providerId: 'kimi', credentials: { token: 'K-FIXTURE' } }) })
+      else { f.setProps({ open: false }); f.setProps({ open: true }) }
+      const before = plain(f.credentials())
+      pending.resolve(stage === 'reauthenticate' ? { success: true, accountId: 'existing-a', state: 'updated' } : account({ providerId: 'zai', credentials: { token: 'LATE-FIXTURE' } }))
+      await first
+      assert.deepEqual(plain(f.credentials()), before)
+      if (stage === 'reauthenticate') assert.deepEqual(f.calls.getById, [])
+      assert.deepEqual(f.calls.update, []); assert.deepEqual(f.calls.add, [])
+    }
+  }
+})
+
+test('a failed baseline read reports backend success separately and never permits stale credential editing or overwrite', async () => {
+  for (const getById of [async () => null, async () => account({ id: 'other-account' }), async () => { throw Error('SECRET-READ-FIXTURE') }]) {
+    const f = zaiFixture({ getById })
+    await f.login()
+    assert.equal(f.status(), f.t('providers.accountLoginSavedRefreshFailed'))
+    const fields = f.find(node => node.props.fields && node.props.credentials)
+    assert.equal(fields.props.disabled, true)
+    fields.props.onChange('token', 'STALE-EDIT-FIXTURE'); await f.validate()
+    assert.deepEqual(plain(f.credentials()), {}); assert.deepEqual(f.calls.validate, [])
+    await f.save()
+    assert.equal(f.calls.update.length, 1); assert.equal(Object.hasOwn(f.calls.update[0][1], 'credentials'), false)
+  }
+})
+
+test('Zai restored login help distinguishes opening, verified identity, automatic save and old webpage sessions', () => {
+  for (const language of ['zh-CN', 'en-US']) {
+    const f = zaiFixture({ language }), html = renderToStaticMarkup(f.render())
+    for (const key of ['openAccountLogin', 'accountLoginHelp', 'accountLoginSessionHelp']) {
+      assert.notEqual(f.t(`providers.${key}`), `providers.${key}`)
+      assert.ok(html.includes(f.t(`providers.${key}`)))
+    }
+    assert.equal(html.includes(f.t('providers.reloginHelp')), false)
+  }
+})
+
+test('account page rejects a disappeared account rather than reporting a no-write save as success', async () => {
+  const filename = 'src/renderer/src/pages/Providers.tsx', source = read(filename)
+  const ast = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  let handler
+  const visit = node => { if (ts.isVariableDeclaration(node) && node.name.getText(ast) === 'handleUpdateAccount') handler = node.initializer; ts.forEachChild(node, visit) }
+  visit(ast); assert.ok(handler)
+  const notifications = [], module = { exports: {} }
+  vm.runInNewContext(ts.transpileModule(`module.exports = ${handler.getText(ast)}`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText,
+    { module, store: { getAccountById: () => undefined }, t: key => key, toast: value => notifications.push(value), window: { electronAPI: { accounts: { update() { assert.fail('Missing account must not be updated') } } } } })
+  await assert.rejects(module.exports('deleted-account', {}), /providers.operationFailed/)
+  assert.equal(notifications.length, 1); assert.equal(notifications[0].variant, 'destructive')
 })

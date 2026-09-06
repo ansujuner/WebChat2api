@@ -7,6 +7,13 @@ The original copyright and **GPL-3.0-or-later** grant are retained in
 
 ## Changes from the supplied project
 
+- v1.6.3 (2026-09-06): added account-bound Z.ai browser restoration using only
+  that account's saved credentials. Website identity, not a JWT shape or an
+  opened window, gates an atomic save to the original account. The website stays
+  open; stale form saves cannot overwrite refreshed credentials. Added a complete
+  production UI/browser/storage fixture and an explicit, redacted real-account
+  restore diagnostic. This does not certify chat CAPTCHA clearance.
+
 - v1.6.2 (2026-09-06): restored the missing OAuth entry when editing an
   existing non-Arena website account. Re-login requires explicit save to the
   original account and preserves scheduling controls. Added UI lifecycle and

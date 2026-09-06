@@ -311,7 +311,29 @@
     "reloginHelp": "Sign in with the same provider account, then select “Save Changes”. If credentials were expired or invalid, return to the account list and choose “Validate credentials” in that account’s menu, then check liveness. Sign-in does not clear CAPTCHA or restrictions, create or enable an account, or release cooldown.",
     "reloginSaveRequired": "Login credentials received but not saved. Select “Save Changes”. If credentials were expired or invalid, return to the account list and validate credentials from that account’s menu, then check liveness.",
     "reloginIdentityMismatch": "This login belongs to a different identity. Original credentials were kept. Sign in with the same account, or use “Add Account” for another account.",
-    "reloginInvalidCredentials": "Complete valid credentials were not received. Original credentials were kept. Complete sign-in again."
+    "reloginInvalidCredentials": "Complete valid credentials were not received. Original credentials were kept. Complete sign-in again.",
+    "openAccountLogin": "Open account sign-in",
+    "accountLoginHelp": "Use the saved account credentials to open this account’s app-owned provider window and try to restore sign-in. Complete any required sign-in or verification with the same account. Once the provider identity is confirmed, credential updates are saved automatically to this account; no second Save Changes is needed.",
+    "accountLoginSessionHelp": "An open window does not mean sign-in succeeded. Wait for Sign-in restored or Credentials updated and saved below. The provider window stays open; closing this editor does not cancel its sign-in flow. This does not enable the account, release cooldown, or guarantee restoration of an old web conversation or CAPTCHA state.",
+    "accountLoginSaveDraftFirst": "Manual credentials have unsaved changes. Save Changes first, then reopen this account’s sign-in window. Unsaved credentials will not be used or overwritten.",
+    "accountLoginRestoring": "Restoring account sign-in. Complete any required sign-in in the provider window…",
+    "accountLoginRestored": "Sign-in restored and provider identity confirmed. The current saved credentials are still in use; no further save is needed. You can check liveness from the account list.",
+    "accountLoginUpdated": "Provider identity confirmed. Credentials updated and saved to this account; no further save is needed. You can check liveness from the account list.",
+    "accountLoginSavedRefreshFailed": "The provider identity and saved sign-in were confirmed, but the editor could not refresh. Close and reopen it; the old form will not overwrite saved credentials.",
+    "accountLoginErrors": {
+      "invalid_account": "The account is unavailable. Return to the account list and refresh before trying again.",
+      "unsupported_provider": "Restoring an existing account’s web sign-in is not supported for this provider yet.",
+      "busy": "An account sign-in is already being handled. Complete or close its window first.",
+      "cancelled": "Sign-in restoration was cancelled. No new credentials were saved.",
+      "timeout": "Provider sign-in timed out. No new credentials were saved. Reopen the account window to sign in.",
+      "identity_mismatch": "The provider identity does not match this account. Credentials were not replaced. Sign in with the same account.",
+      "identity_unverified": "The provider identity could not be confirmed. No new credentials were saved. Complete the required sign-in or verification.",
+      "login_required": "The provider still requires sign-in. Sign in with the same account in its window, then retry.",
+      "network_error": "The provider could not be reached. Sign-in restoration is incomplete. Check the network and proxy settings.",
+      "browser_error": "The account window could not complete sign-in restoration. Check the window and retry; saving has not been confirmed.",
+      "account_changed": "Another operation changed this account. Its latest settings were not overwritten. Close and reopen the editor.",
+      "save_failed": "The provider identity check finished, but credentials could not be saved. Retry; saving is not confirmed."
+    }
   },
   "loginGuide": {
     "getToken": "Get {{provider}} Credentials",

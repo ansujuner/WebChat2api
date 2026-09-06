@@ -34,18 +34,24 @@
 
 ## 教程
 
-### 已有账号重新登录（v1.6.2 起）
+### 已有账号恢复网页登录（v1.6.3 起）
 
 1. 打开 **供应商 → Z.ai → 账户管理**。
-2. 找到该账号，点 **⋯ → 编辑账户 → OAuth 登录 → 重新登录**。
-3. 在弹出的官网登录窗口登录**同一个账号**，不要把密码或令牌发给他人。
-4. 回到软件后点 **保存更改**。此操作更新原账号，不重复添加，不修改手动关闭开关或封禁倒计时。关闭编辑窗口或登录失败不会保存新凭据。
-5. 如账号原本显示认证错误，保存后返回账号列表，点该账号 **⋯ → 验证凭据**；之后手动 **测活**，确认实际聊天是否有返回。编辑窗口内同名按钮只检查表单，不更新已保存账号的状态。
+2. 找到该账号，点 **⋯ → 编辑账户 → OAuth 登录 → 打开账号网页登录**。
+3. 软件使用此账号**已经保存**的凭据，恢复到该账号独立的官网窗口；不会读取日常浏览器资料或其他账号会话。未保存的手动凭据修改需要先保存。
+4. 官网登录已失效时，在此窗口登录**同一个账号**。不要把密码或令牌发给他人。官网身份检查会区分访客和真实账号，不能仅凭打开窗口或获得一个 JWT 就认定成功。
+5. 官网确认身份后，主进程自动保存更新到**原账号**，界面明确显示“已更新并保存”或“已恢复，继续使用当前已保存的凭据”。不需要再次保存登录凭据；账号名称、手动开关、封禁时间和用量不变。名称等手动编辑仍需点“保存更改”。
+6. 官网窗口会保持打开。关闭编辑页不会取消已经启动的后台恢复；关闭官网窗口可终止尚未完成的验证。账号被删除或同时修改时，旧登录结果不能覆盖或重新创建它。
+7. 之后可在账号列表手动 **测活**，确认聊天是否有返回；官网身份有效不代表聊天验证码限制已经解除。
 
 新增账号可使用 **添加账户 → OAuth 登录 → 打开 OAuth 登录**；手动输入仍保留在另一页签。
 
-**边界：**旧版编辑窗口确实没有 OAuth 页签。新版补上的是重新登录入口，不是验证码绕过。当前登录窗口在获取登录凭据后会自动关闭；它不一定显示聊天验证码，重新登录也不保证解除 `captcha_required`。若工具测试仍报告官网验证要求，应保持“受阻”状态，不能视为工具调用已通过。`captcha_verify_param` 是短时调试字段，不是长期凭据；不要复制分享浏览器会话或验证码数据。
+**版本区别：**v1.6.2 虽然补上了页签，但仍创建空白临时登录会话、要求手动保存；它不能证明原账号网页已恢复。v1.6.3 的上述账号绑定通路才会恢复原凭据并在官网认证后自动保存。新增账号仍走独立的新登录流程。
+
+**验证码边界：**此功能不是验证码绕过，也不保证解除 `captcha_required`。若工具测试仍报告官网验证要求，保持“受阻”状态，不能视为工具调用已通过。恢复不复用旧 `captcha_verify_param` 或批量 Cookie 快照；不要复制分享浏览器会话或验证码数据。
+
+`captcha_verify_param` 仅保留为短时调试字段，不是长期登录凭据。
 
 ### English: sign in to an existing account again
 
-From **Providers → Z.ai → Accounts**, choose **⋯ → Edit Account → OAuth Login → Sign in again**, then use the same website account. Click **Save Changes** after returning. The original account ID, custom label, manual disable switch and cooldown remain intact. If the old authentication status was an error, return to the account list and use its **⋯ → Validate Credentials**, followed by a manual liveness check. The edit dialog's validation button only validates the draft. Successful sign-in alone does not establish chat availability or resolve a website captcha.
+From **Providers → Z.ai → Accounts**, choose **⋯ → Edit Account → OAuth Login → Open account sign-in**. The app restores only this account's saved token into an isolated website window. If sign-in has expired, complete normal login with the same identity. Verified credential changes are saved automatically to the original account; the window stays open. Manually edited labels still require Save Changes. Existing disable/cooldown settings remain intact. This flow does not prove chat or CAPTCHA availability.

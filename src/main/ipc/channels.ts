@@ -39,6 +39,7 @@ export const IpcChannels = {
   ACCOUNTS_GET_BY_PROVIDER: 'accounts:getByProvider',
   ACCOUNTS_ADD: 'accounts:add',
   ACCOUNTS_UPDATE: 'accounts:update',
+  ACCOUNTS_REAUTHENTICATE: 'accounts:reauthenticate',
   ACCOUNTS_SET_ENABLED: 'accounts:setEnabled',
   ACCOUNTS_CLEAR_SUSPENSION: 'accounts:clearSuspension',
   ACCOUNTS_CHANGED: 'accounts:changed',

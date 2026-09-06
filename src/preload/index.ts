@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IpcChannels } from '../main/ipc/channels'
 import type { AccountLivenessInput, AccountLivenessJob } from '../shared/accountLiveness'
+import type { AccountReauthenticationResult } from '../shared/accountReauthentication'
 import type { 
   Provider, 
   Account, 
@@ -153,6 +154,9 @@ const accountsAPI = {
   
   update: (id: string, updates: Partial<Account>): Promise<Account | null> => 
     ipcRenderer.invoke(IpcChannels.ACCOUNTS_UPDATE, id, updates),
+
+  reauthenticate: (accountId: string): Promise<AccountReauthenticationResult> =>
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_REAUTHENTICATE, accountId),
 
   setEnabled: (id: string, enabled: boolean): Promise<Account | null> =>
     ipcRenderer.invoke(IpcChannels.ACCOUNTS_SET_ENABLED, id, enabled),

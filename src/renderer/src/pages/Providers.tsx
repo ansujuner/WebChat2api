@@ -469,7 +469,7 @@ export function Providers() {
   const handleUpdateAccount = async (id: string, updates: Partial<Account>) => {
     try {
       const account = store.getAccountById(id)
-      if (!account) return
+      if (!account) throw new Error(t('providers.operationFailed'))
       
       const updated = await window.electronAPI.accounts.update(id, updates)
       if (!updated) throw new Error('Account update failed')

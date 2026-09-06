@@ -25,6 +25,8 @@ import type {
   BrowserRuntimeInfo,
 } from '../../../shared/types'
 import type { AccountLivenessInput, AccountLivenessJob } from '../../../shared/accountLiveness'
+import type { AccountReauthenticationResult } from '../../../shared/accountReauthentication'
+export type { AccountReauthenticationResult, AccountReauthenticationErrorCode } from '../../../shared/accountReauthentication'
 export type { AccountLivenessInput, AccountLivenessJob } from '../../../shared/accountLiveness'
 
 export type { 
@@ -128,6 +130,7 @@ interface ProvidersAPI {
 }
 
 interface AccountsAPI {
+  reauthenticate: (accountId: string) => Promise<AccountReauthenticationResult>
   getAll: (includeCredentials?: boolean) => Promise<Account[]>
   add: (data: {
     providerId: string

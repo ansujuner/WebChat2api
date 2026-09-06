@@ -42,7 +42,7 @@ import { normalizeRequestLogConfig } from '../requestLogs/types'
 import { normalizeToolCallingConfig } from '../../shared/toolCalling'
 import { AppLogManager } from '../appLogs/manager'
 import type { AppLogFilter } from '../appLogs/types'
-import { normalizeAccountIdentity } from '../../shared/accountIdentity'
+import { normalizeAccountIdentity, accountEmail, accountUserId } from '../../shared/accountIdentity'
 import { savedArenaCatalog } from '../providers/arenaCatalog'
 import { accountAvailability, validateAccountAvailabilityUpdate } from '../../shared/accountAvailability'
 import { setTimeout, clearTimeout } from 'node:timers'
@@ -768,6 +768,55 @@ export class StoreManager {
     this.refreshAccountAvailability()
     this.notifyAccountsChanged()
     return { ...updated, credentials }
+  }
+
+  /** Commit a main-process verified login to its original account, never a renderer-supplied credential target. */
+  commitAccountReauthentication(
+    id: string,
+    expected: { providerId: string; credentialRevision: number; credentials: Record<string, string>; email?: string; providerUserId?: string },
+    verified: { credentials: Record<string, string>; accountInfo: { userId?: string; email?: string } },
+  ): 'restored' | 'updated' | null {
+    this.ensureInitialized()
+    if (!validCredentialRecord(expected.credentials) || !validCredentialRecord(verified.credentials)
+      || !Number.isSafeInteger(expected.credentialRevision) || expected.credentialRevision < 0) throw new Error('Invalid account reauthentication commit')
+    const accounts = (this.store!.get('accounts') || []) as Account[]
+    const current = accounts.find(account => account.id === id)
+    const provider = this.getProviderById(expected.providerId)
+    if (!current || current.providerId !== expected.providerId || expected.providerId !== 'zai' || provider?.type !== 'builtin'
+      || credentialRevision(current) !== expected.credentialRevision) return null
+    const email = accountEmail(verified.accountInfo.email)
+    const userId = accountUserId(verified.accountInfo.userId)
+    if (!email && !userId) throw new Error('Account identity was not verified')
+    const previousEmail = accountEmail(expected.email)
+    const previousUserId = accountUserId(expected.providerUserId)
+    if (accountEmail(current.email) !== previousEmail || accountUserId(current.providerUserId) !== previousUserId) return null
+    if ((previousUserId && userId !== previousUserId) || (previousEmail && email?.toLowerCase() !== previousEmail.toLowerCase())) return null
+    const decrypted = this.decryptCredentials(current.credentials)
+    const same = (a: Record<string, string>, b: Record<string, string>) => Object.keys(a).length === Object.keys(b).length
+      && Object.keys(a).every(key => Object.hasOwn(b, key) && a[key] === b[key])
+    if (!same(decrypted, expected.credentials)) return null
+    // Z.ai's account-bound browser verifies this token. Old CAPTCHA proof and cookie snapshots are not reused.
+    const token = verified.credentials.token
+    if (typeof token !== 'string' || !token.trim() || token.length > 128 * 1024 || /\s/.test(token)) throw new Error('Invalid verified account credentials')
+    const credentials = { token }
+    const nextIdentity = { ...(email ? { email } : {}), ...(userId ? { providerUserId: userId } : {}) }
+    const changed = !same(decrypted, credentials) || (email !== undefined && current.email !== email)
+      || (userId !== undefined && current.providerUserId !== userId) || current.status !== 'active' || !!current.errorMessage
+    if (!changed) return 'restored'
+    const nextRevision = credentialRevision(current) + 1
+    if (!Number.isSafeInteger(nextRevision)) throw new Error('Account credential revision exhausted')
+    const updated: Account = { ...current, ...nextIdentity, credentials: this.encryptCredentials(credentials),
+      credentialRevision: nextRevision, status: 'active', errorMessage: undefined, updatedAt: Date.now() }
+    // One synchronous write preserves current user preferences and cannot resurrect a deleted/changed account.
+    this.store!.set('accounts', accounts.map(account => account.id === id ? updated : account))
+    const saved = ((this.store!.get('accounts') || []) as Account[]).find(account => account.id === id)
+    if (!saved || saved.providerId !== expected.providerId || credentialRevision(saved) !== nextRevision
+      || !same(this.decryptCredentials(saved.credentials), credentials) || saved.status !== 'active' || saved.errorMessage
+      || saved.email !== updated.email || saved.providerUserId !== updated.providerUserId) {
+      throw new Error('Account reauthentication save could not be verified')
+    }
+    this.notifyAccountsChanged()
+    return 'updated'
   }
 
   /**

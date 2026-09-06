@@ -43,6 +43,15 @@ function application(options = {}) {
     },
     './updater': { UpdaterManager: { getInstance: () => ({ destroy() {} }) } },
     './store/store': { storeManager: { flushPendingWrites() {} } },
+    './oauth/zaiAccountBrowser': { zaiAccountBrowserManager: {
+      hasOpenBrowsers: () => !!options.zaiOpen,
+      destroy: async () => { calls.push({ operation: 'closeZai' }); if (options.closeZai) await options.closeZai() },
+    } },
+    './diagnostics/zaiAccountLoginProbe': { runZaiAccountLoginProbe: async save => {
+      calls.push({ operation: 'zaiLogin' })
+      await save({ live: false, stream: false, protocol: 'openai', status: 'awaiting_login', chatTested: false })
+      return { live: false, stream: false, protocol: 'openai', status: 'passed', accountVerified: true, chatTested: false }
+    } },
     './arena/browserManager': { arenaBrowserManager: {
       hasOpenBrowsers: () => !!options.arenaOpen,
       destroy: async () => { calls.push({ operation: 'closeArena' }); if (options.closeArena) await options.closeArena() },
@@ -110,6 +119,31 @@ export const __fixture = {
     async second(argv) { events.get('second-instance')({}, argv); await controls.drain() },
   }
 }
+
+test('existing Z.ai account restore is explicitly dispatched without proxy startup or chat generation', async () => {
+  const fixture = application()
+  await fixture.ready()
+  await fixture.second(['fixture-electron.exe', '--chat2api-probe=zai-login'])
+  assert.equal(fixture.calls.filter(call => call.operation === 'zaiLogin').length, 1)
+  assert.ok(fixture.calls.every(call => !['start', 'probe', 'toolSmoke'].includes(call.operation)))
+  assert.equal(fixture.writes.at(-1).data.accountVerified, true)
+  assert.equal(fixture.writes.at(-1).data.chatTested, false)
+  assert.equal(fixture.writes.at(-1).data.live, false)
+})
+
+test('quit waits for retained Z.ai account browsers and never opens a new one', async () => {
+  let release
+  const closing = new Promise(resolve => { release = resolve })
+  const fixture = application({ zaiOpen: true, closeZai: () => closing })
+  let prevented = 0
+  fixture.beforeQuit({ preventDefault() { prevented++ } })
+  assert.equal(prevented, 1)
+  assert.equal(fixture.calls.filter(call => call.operation === 'closeZai').length, 1)
+  assert.equal(fixture.quits, 0)
+  release()
+  for (let i = 0; i < 12; i++) await Promise.resolve()
+  assert.equal(fixture.quits, 1)
+})
 
 test('quit waits once for the owned login browser then allows normal exit', async () => {
   let release

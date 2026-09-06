@@ -5,10 +5,10 @@ const assert = require('node:assert/strict')
 
 module.exports = async function verifyAccountRelogin({ invoke, check, ipcMain }) {
   const channel = 'oauth:startInAppLogin'
-  const name = 'Isolated existing Z.ai account'
+  const name = 'Isolated existing Kimi account'
   const oldToken = 'isolated-relogin-old-token'
   const newToken = 'isolated-relogin-new-token'
-  const identity = { userId: 'isolated-zai-user', email: 'isolated-zai@example.invalid' }
+  const identity = { userId: 'isolated-kimi-user', email: 'isolated-kimi@example.invalid' }
   const cooldownUntil = Date.now() + 600000
   let accountId, finishLogin, loginCount = 0
   const call = (method, ...args) => invoke(`window.electronAPI.accounts.${method}(${args.map(value => JSON.stringify(value)).join(',')})`)
@@ -43,26 +43,26 @@ module.exports = async function verifyAccountRelogin({ invoke, check, ipcMain })
   // production renderer, preload, account update and encrypted store are retained.
   ipcMain.removeHandler(channel)
   ipcMain.handle(channel, async (_event, input) => {
-    assert.equal(input.providerId, 'zai')
-    assert.equal(input.providerType, 'zai')
+    assert.equal(input.providerId, 'kimi')
+    assert.equal(input.providerType, 'kimi')
     loginCount += 1
     return new Promise(resolve => { finishLogin = resolve })
   })
   try {
-    const account = await call('add', { providerId: 'zai', name, nameSource: 'custom', email: identity.email,
+    const account = await call('add', { providerId: 'kimi', name, nameSource: 'custom', email: identity.email,
       providerUserId: identity.userId, credentials: { token: oldToken, captcha_verify_param: 'isolated-obsolete-captcha' }, dailyLimit: 17 })
     accountId = account.id
     await call('update', accountId, { enabled: false, cooldownUntil, cooldownReason: 'temporary_ban', status: 'expired' })
     await invoke("window.location.hash = '#/providers'; void 0")
-    await until(`!!document.querySelector('img[alt="Z.ai"]')`, 'Z.ai provider card')
-    assert.equal(await invoke(`(() => { const card=document.querySelector('img[alt="Z.ai"]').closest('.glass-card'); const node=Array.from(card.querySelectorAll('button')).find(node=>['账户管理','Accounts'].includes(node.textContent.trim())); if(!node)return false; node.click(); return true })()`), true)
+    await until(`!!document.querySelector('img[alt="Kimi"]')`, 'Kimi provider card')
+    assert.equal(await invoke(`(() => { const card=document.querySelector('img[alt="Kimi"]').closest('.glass-card'); const node=Array.from(card.querySelectorAll('button')).find(node=>['账户管理','Accounts'].includes(node.textContent.trim())); if(!node)return false; node.click(); return true })()`), true)
     await edit()
-    check('existing-zai-account-menu-edit-exposes-oauth-relogin-in-real-renderer')
+    check('existing-kimi-account-menu-edit-exposes-oauth-relogin-in-real-renderer')
     await clickText(['重新登录', 'Sign in again'])
     await until(`Array.from(document.querySelectorAll('[role="dialog"] button')).some(node=>['保存更改','Save Changes'].includes(node.textContent.trim())&&node.disabled)`, 'save disabled while signing in')
     await until(() => loginCount === 1, 'login request reached IPC')
     assert.equal(typeof finishLogin, 'function')
-    finishLogin({ success: true, providerId: 'zai', credentials: { token: newToken }, accountInfo: identity })
+    finishLogin({ success: true, providerId: 'kimi', credentials: { token: newToken }, accountInfo: identity })
     await until(`Array.from(document.querySelectorAll('[role="dialog"] button')).some(node=>['保存更改','Save Changes'].includes(node.textContent.trim())&&!node.disabled)`, 'ready to explicitly save')
     assert.equal((await call('getById', accountId, true)).credentials.token, oldToken, 'Login must not write the account before Save Changes')
     check('relogin-real-preload-reaches-isolated-oauth-boundary-and-requires-explicit-save')
@@ -86,7 +86,7 @@ module.exports = async function verifyAccountRelogin({ invoke, check, ipcMain })
     await until(`Array.from(document.querySelectorAll('[role="dialog"] button')).some(node=>['保存更改','Save Changes'].includes(node.textContent.trim())&&node.disabled)`, 'second login pending')
     await until(() => loginCount === 2, 'second login reached IPC')
     await cancel()
-    finishLogin({ success: true, providerId: 'zai', credentials: { token: 'isolated-stale-login-token' }, accountInfo: identity })
+    finishLogin({ success: true, providerId: 'kimi', credentials: { token: 'isolated-stale-login-token' }, accountInfo: identity })
     await edit()
     await clickText(['手动输入', 'Manual Input'], '[role="tab"]')
     await until(`!!document.getElementById('token')`, 'original credentials after reopen')
@@ -95,7 +95,7 @@ module.exports = async function verifyAccountRelogin({ invoke, check, ipcMain })
     assert.equal((await call('getById', accountId, true)).credentials.token, newToken)
     check('cancelled-relogin-cannot-overwrite-reopened-account-or-persist-late-credentials')
   } finally {
-    finishLogin?.({ success: false, providerId: 'zai', error: 'Login window was closed' })
+    finishLogin?.({ success: false, providerId: 'kimi', error: 'Login window was closed' })
     ipcMain.removeHandler(channel)
     if (accountId) await call('delete', accountId)
   }

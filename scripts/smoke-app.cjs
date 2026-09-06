@@ -52,7 +52,7 @@ if (!process.versions.electron) {
 }
 
 function runChild() {
-  const { app, session, ipcMain } = require('electron')
+  const { app, session, ipcMain, BrowserWindow } = require('electron')
   const os = require('node:os')
   const http = require('node:http')
   const net = require('node:net')
@@ -389,6 +389,7 @@ function runChild() {
 
     await require('./smoke-custom-tools.cjs')({ invoke, check, port })
     await require('./smoke-account-relogin.cjs')({ invoke, check, ipcMain })
+    await require('./smoke-zai-account-browser.cjs')({ invoke, check, app, BrowserWindow })
 
     // Fake account in the isolated profile only. Never validate it against a provider.
     const account = await invoke('window.electronAPI.accounts.add({providerId:"deepseek", name:"isolated-scheduling-fixture", credentials:{token:"fixture-not-a-real-token"}})')

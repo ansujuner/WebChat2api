@@ -7,6 +7,7 @@ import { AccountManager } from '../store/accounts'
 import { ProviderChecker } from '../providers/checker'
 import { syncArenaProviderModels } from '../providers/arenaIntegration'
 import { CustomProviderManager } from '../providers/custom'
+import { reauthenticateAccount, clearAccountReauthentication } from '../oauth/accountReauthentication'
 import { getBuiltinProviders, getBuiltinProvider } from '../providers/builtin'
 import { oauthManager } from '../oauth/manager'
 import { proxyServer } from '../proxy/server'
@@ -34,6 +35,7 @@ import type { ProviderType } from '../oauth/types'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { AccountLivenessJob } from '../../shared/accountLiveness'
+import type { AccountReauthenticationResult } from '../../shared/accountReauthentication'
 
 const updaterManager = UpdaterManager.getInstance()
 
@@ -282,7 +284,10 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   })
 
   ipcMain.handle(IpcChannels.PROVIDERS_DELETE, async (_, id: string): Promise<boolean> => {
-    return CustomProviderManager.delete(id)
+    const accountIds = AccountManager.getByProviderId(id).map(account => account.id)
+    const deleted = CustomProviderManager.delete(id)
+    if (deleted) await Promise.all(accountIds.map(accountId => clearAccountReauthentication(accountId)))
+    return deleted
   })
 
   ipcMain.handle(IpcChannels.PROVIDERS_CHECK_STATUS, async (_, providerId: string): Promise<ProviderCheckResult> => {
@@ -581,6 +586,14 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     return AccountManager.update(id, updates)
   })
 
+  ipcMain.handle(IpcChannels.ACCOUNTS_REAUTHENTICATE, async (event, accountId: unknown): Promise<AccountReauthenticationResult> => {
+    const owner = BrowserWindow.getAllWindows().find(window => !window.isDestroyed() && window.webContents === event.sender)
+    if (!owner || !isLivenessAppWindow(owner) || event.sender.isDestroyed() || !event.senderFrame
+      || event.senderFrame !== event.sender.mainFrame) throw new Error('Account reauthentication is available only in the main application window.')
+    // Once explicitly started, verification and atomic saving belong to main even if the editor closes.
+    return reauthenticateAccount(accountId)
+  })
+
   ipcMain.handle(IpcChannels.ACCOUNTS_SET_ENABLED, async (_, id: string, enabled: boolean): Promise<Account | null> => {
     AccountManager.setEnabled(id, enabled)
     return AccountManager.getById(id, false) || null
@@ -592,7 +605,9 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   })
 
   ipcMain.handle(IpcChannels.ACCOUNTS_DELETE, async (_, id: string): Promise<boolean> => {
-    return AccountManager.delete(id)
+    const deleted = AccountManager.delete(id)
+    if (deleted) await clearAccountReauthentication(id)
+    return deleted
   })
 
   ipcMain.handle(IpcChannels.ACCOUNTS_VALIDATE, async (_, accountId: string): Promise<boolean> => {
